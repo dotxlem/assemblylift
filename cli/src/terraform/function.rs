@@ -79,6 +79,16 @@ resource "aws_lambda_function" "asml_{{service}}_{{name}}_lambda" {
     layers = [var.runtime_layer_arn]
     {{/if}}
 
+    {{#if has_environment}}
+    environment {
+      variables = {
+        {{#each environment}}
+        {{this.key}} = "{{this.value}}"
+        {{/each}}
+      }
+    }
+    {{/if}}
+
     source_code_hash = filebase64sha256("${path.module}/{{name}}.zip")
 }
 
@@ -141,7 +151,15 @@ pub struct TerraformFunction {
     pub http_verb: Option<String>,
     pub http_path: Option<String>,
 
+    pub environment: Vec<TerraformKeyValue>,
+
     pub project_name: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TerraformKeyValue {
+  pub key: String,
+  pub value: String,
 }
 
 pub fn write(project_path: &PathBuf, function: &TerraformFunction) -> Result<(), io::Error> {
@@ -165,6 +183,10 @@ pub fn write(project_path: &PathBuf, function: &TerraformFunction) -> Result<(),
         "service_has_http_api".to_string(),
         to_json(function.service_has_http_api),
     );
+
+    let env = &function.environment;
+    data.insert("has_environment".to_string(), to_json(env.len() > 0));
+    data.insert("environment".to_string(), to_json(env));
 
     let render = reg.render(file_name, &data).unwrap();
 

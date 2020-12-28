@@ -52,7 +52,7 @@ pub struct HttpFunction {
 pub struct Function {
     pub name: String,
     pub handler_name: String,
-
+    pub environment: Option<HashMap<String, String>>,
     pub http: Rc<Option<HttpFunction>>,
 }
 

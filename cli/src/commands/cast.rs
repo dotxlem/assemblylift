@@ -10,7 +10,7 @@ use crate::bom;
 use crate::bom::DocumentSet;
 use crate::projectfs::Project;
 use crate::terraform;
-use crate::terraform::function::TerraformFunction;
+use crate::terraform::function::{TerraformFunction, TerraformKeyValue};
 use crate::terraform::service::TerraformService;
 
 pub fn command(matches: Option<&ArgMatches>) {
@@ -181,6 +181,10 @@ pub fn command(matches: Option<&ArgMatches>) {
                 http_path: match function_http.as_ref() {
                     Some(http) => Some(http.path.to_string()),
                     None => None,
+                },
+                environment: match function.environment {
+                    Some(env) => env.iter().map(|(key, value)| TerraformKeyValue { key: key.to_string(), value: value.to_string() }).collect(),
+                    None => Vec::new(),
                 },
                 project_name: project.name.clone(),
             };
