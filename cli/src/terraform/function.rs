@@ -15,6 +15,10 @@ variable "runtime_layer_arn" {
   type = string
 }
 
+variable "project_bucket" {
+  type = string
+}
+
 locals {
   lambda_name = "asml-{{project_name}}-{{service}}-{{name}}"
 }
@@ -81,17 +85,18 @@ resource "aws_lambda_function" "asml_{{service}}_{{name}}_lambda" {
     role          = aws_iam_role.lambda_iam_role.arn
     runtime       = "provided"
     handler       = "{{name}}.{{handler_name}}"
-    filename      = "${path.module}/{{name}}.zip"
     timeout       = {{timeout}}
     memory_size   = {{size}}
 
-    {{#if service_has_layer}}
-    layers = [var.runtime_layer_arn, var.service_layer_arn]
-    {{else}}
-    layers = [var.runtime_layer_arn]
-    {{/if}}
+    package_type  = "Image"
+    image_uri     = "public.ecr.aws/akkoro/assemblylift/asml-lambda-runtime:latest"
+}
 
-    source_code_hash = filebase64sha256("${path.module}/{{name}}.zip")
+resource "aws_s3_bucket_object" "asml_{{service}}_{{name}}_code_object" {
+    bucket = var.project_bucket
+    key    = "/bin/services/{{service}}/{{name}}.wasm.bin"
+    acl    = "private"
+    source = "${path.module}/{{name}}.wasm.bin"
 }
 
 resource "aws_iam_role" "lambda_iam_role" {

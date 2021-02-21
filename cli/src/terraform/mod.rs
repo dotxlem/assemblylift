@@ -23,6 +23,11 @@ provider "aws" {
     region = "{{aws_region}}"
 }
 
+resource "aws_s3_bucket" "{{project_name}}_bucket" {
+  bucket = "asml-{{project_name}}"
+  acl    = "private"
+}
+
 resource "aws_lambda_layer_version" "asml_runtime_layer" {
   filename   = "${path.module}/../.asml/runtime/bootstrap.zip"
   layer_name = "asml-{{project_name}}-runtime"
@@ -46,6 +51,7 @@ module "{{this.name}}" {
 module "{{this.name}}" {
   source = "./services/{{this.service}}/{{this.name}}"
 
+  project_bucket    = aws_s3_bucket.{{project_name}}_bucket.id
   runtime_layer_arn = aws_lambda_layer_version.asml_runtime_layer.arn
   {{#if this.service_has_layer}}
   service_layer_arn = module.{{this.service}}.service_layer_arn

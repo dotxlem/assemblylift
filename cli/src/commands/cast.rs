@@ -187,12 +187,12 @@ pub fn command(matches: Option<&ArgMatches>) {
             println!("📄 > Wrote {}", module_file_path.clone());
             module_file.write_all(&module_bytes).unwrap();
 
-            artifact::zip_files(
-                vec![module_file_path],
-                format!("{}/{}.zip", function_artifact_path.clone(), &function.name),
-                None,
-                false,
-            );
+            //artifact::zip_files(
+            //    vec![module_file_path],
+            //    format!("{}/{}.zip", function_artifact_path.clone(), &function.name),
+            //    None,
+            //    false,
+            //);
 
             let function_http = function.http.clone();
             let tf_function_service = tf_service.clone();
