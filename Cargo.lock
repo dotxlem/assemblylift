@@ -115,6 +115,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "assemblylift-core-entity"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "assemblylift-core-guest"
 version = "0.2.0"
 dependencies = [

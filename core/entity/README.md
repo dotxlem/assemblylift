@@ -1,0 +1,2 @@
+assemblylift-core-entity
+------------------------

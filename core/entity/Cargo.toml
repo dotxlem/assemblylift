@@ -1,0 +1,12 @@
+[package]
+name = "assemblylift-core-entity"
+version = "0.0.0"
+description = "AssemblyLift core entity library"
+edition = "2018"
+license-file = "../../LICENSE.md"
+repository = "https://github.com/akkoro/assemblylift"
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.5"
