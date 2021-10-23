@@ -1,29 +1,35 @@
 [entity]
 name = "user"
 
-[[entity.fields]]
+[[fields]]
 name = "name"
 type = "string"
-attributes = [] # Optional
+attributes = ["searchable"] # Optional
 
-[[entity.fields]]
+[[fields]]
 name = "email"
 type = "string"
-attributes = [] # Optional
+attributes = ["unique", "primary"] # Optional
 
-[[entity.caps]]
+[[actions]]
 action = "load"
-from = { location = "asml/service/service-name/*", in = ["asml/*"], effect = "allow" }
+[actions.cap]
+location = "asml/service/service-name/*"
+origins = ["asml/*"]
+effect = "allow"
 
-[[entity.caps]]
+[[actions]]
 action = "store"
-in = { location = "dynamodb/region/table-name", from = ["asml/*"], effect = "allow" }
+[actions.cap]
+location = "dynamodb/region/table-name"
+origins = ["asml/*"]
+effect = "allow"
 
-[[entity.policies]]
-name = "policy-name"
-type = "opa" # always OPA
-file = "/path/to/file.rego" # file XOR from
-from = """
-package example
-default allow = false
-"""
+#[[policies]]
+#name = "policy-name"
+#type = "opa" # always OPA
+#file = "/path/to/file.rego" # file XOR from
+#from = """
+#package example
+#default allow = false
+#"""

@@ -7,6 +7,14 @@ license-file = "../../LICENSE.md"
 repository = "https://github.com/akkoro/assemblylift"
 readme = "README.md"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "test-core-entity"
+path = "src/main.rs"
+
 [dependencies]
+macaroon = { git = "https://github.com/macaroon-rs/macaroon", rev = "ca109af" }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.5"

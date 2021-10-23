@@ -1,11 +1,11 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct EntityManifest {
     pub entity: ManifestHeader,
     pub fields: Vec<Field>,
-    pub caps: Option<Vec<Capability>>,
-    pub policies: Option<Vec<Policy>>,
+    pub actions: Option<Vec<Action>>,
+    // pub policies: Option<Vec<Policy>>,
 }
 
 impl EntityManifest {
@@ -14,6 +14,14 @@ impl EntityManifest {
             Ok(contents) => Ok(Self::from(contents)),
             Err(why) => Err(std::io::Error::new(std::io::ErrorKind::Other, why.to_string())),
         }
+    }
+
+    pub fn verify(&self) -> Result<(), ()> {
+        // TODO WARN if no caps
+        // TODO ERROR if file&&from for any policy
+        // TODO ERROR if cap has no args
+        // TODO ERROR if invalid field type
+        Ok(())
     }
 }
 
@@ -26,24 +34,56 @@ impl From<String> for EntityManifest {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct ManifestHeader {
     pub name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
+pub enum Fields {
+    #[serde(rename = "string")]
+    String,
+    #[serde(rename = "number")]
+    Number,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct Field {
     pub name: String,
-    pub r#type: String,
+    pub r#type: Fields,
     pub attributes: Option<Vec<String>>,
 }
 
-#[derive(Deserialize)]
-pub struct Capability {
-    pub action: String,
+#[derive(Deserialize, Debug)]
+pub enum Actions {
+    #[serde(rename = "load")]
+    Load,
+    #[serde(rename = "store")]
+    Store,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
+pub struct Action {
+    pub action: Actions,
+    pub cap: Capability,
+}
+
+#[derive(Deserialize, Debug)]
+pub enum Effect {
+    #[serde(rename = "allow")]
+    Allow,
+    #[serde(rename = "deny")]
+    Deny,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Capability {
+    pub location: String,
+    pub origins: Vec<String>,
+    pub effect: Effect,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct Policy {
     pub name: String,
     pub r#type: String,
