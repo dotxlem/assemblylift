@@ -124,6 +124,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "assemblylift-core-entity-wasm"
+version = "0.0.0"
+dependencies = [
+ "macaroon",
+ "serde",
+]
+
+[[package]]
 name = "assemblylift-core-guest"
 version = "0.2.0"
 dependencies = [
@@ -249,6 +257,15 @@ dependencies = [
  "miniz_oxide",
  "object 0.26.0",
  "rustc-demangle",
+]
+
+[[package]]
+name = "base64"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b25d992356d2eb0ed82172f5248873db5560c4721f564b13cb5193bda5e668e"
+dependencies = [
+ "byteorder",
 ]
 
 [[package]]
@@ -1098,9 +1115,9 @@ dependencies = [
 [[package]]
 name = "macaroon"
 version = "0.1.1"
-source = "git+https://github.com/macaroon-rs/macaroon?rev=ca109af#ca109af0cc63a5557e184513a9444f84d2c3b4bf"
+source = "git+https://github.com/deislabs/libmacaroon-rs?rev=32e8aed#32e8aeda2158fc68e9d0b72381cb0045c3feda1c"
 dependencies = [
- "base64 0.12.3",
+ "base64 0.10.1",
  "log",
  "serde",
  "serde_json",

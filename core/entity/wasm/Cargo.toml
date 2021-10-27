@@ -1,7 +1,7 @@
 [package]
-name = "assemblylift-core-entity"
+name = "assemblylift-core-entity-wasm"
 version = "0.0.0"
-description = "AssemblyLift core entity library"
+description = "AssemblyLift core entity WASM module"
 edition = "2018"
 license-file = "../../LICENSE.md"
 repository = "https://github.com/akkoro/assemblylift"
@@ -9,12 +9,8 @@ readme = "README.md"
 
 [lib]
 path = "src/lib.rs"
-
-[[bin]]
-name = "test-core-entity"
-path = "src/main.rs"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 macaroon = { git = "https://github.com/deislabs/libmacaroon-rs", rev = "32e8aed" }
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.5"

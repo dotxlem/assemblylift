@@ -14,7 +14,7 @@ pub trait Entity {
     fn prototype(&self) -> String;
     fn caps(&self) -> Capabilities;
 }
-// TODO the Entity prototype must also be stored somewhere!
+
 /// An Entity _prototype_ defining its shape and actions
 pub struct EntityPrototype {
     pub name: String,

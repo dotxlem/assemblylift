@@ -5,6 +5,7 @@ members = [
     "core",
     "core/guest",
     "core/entity",
+    "core/entity/wasm",
     "core/iomod",
     "core/iomod/guest",
     "core/io",
