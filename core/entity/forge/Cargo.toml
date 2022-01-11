@@ -1,0 +1,16 @@
+[package]
+name = "assemblylift-core-entity-forge"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+etcd-client = "0.8"
+hashicorp_vault = "2.1"
+macaroon = { version = "0.3.0-alpha", path = "../../../../../Forks/macaroon" } # maybe not needed here
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+toml = "0.5"
+warp = "0.3"
+
+assemblylift-core-entity = { version = "0", path = "../../entity" }

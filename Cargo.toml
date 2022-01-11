@@ -6,6 +6,7 @@ members = [
     "core/guest",
     "core/entity",
     "core/entity/wasm",
+    "core/entity/forge",
     "core/iomod",
     "core/iomod/guest",
     "core/io",
