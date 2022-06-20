@@ -1,6 +1,6 @@
 extern crate serde_json;
 
-use clap::{crate_version, App, AppSettings, Arg};
+use clap::{App, AppSettings, Arg, crate_version};
 
 use crate::commands::{bind, burn, cast, init, make, pack, push, user};
 
@@ -10,6 +10,7 @@ mod projectfs;
 mod providers;
 mod templates;
 mod terraform;
+mod tools;
 mod transpiler;
 
 fn main() {
@@ -40,6 +41,11 @@ fn main() {
                 Arg::with_name("resource")
                     .multiple(true)
                     .required(true)
+            )
+            .arg(
+                Arg::with_name("language")
+                    .short("l")
+                    .takes_value(true)
             )
         )
         .subcommand(App::new("cast").about("Build the AssemblyLift application"))

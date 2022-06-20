@@ -4,13 +4,15 @@ pub mod asml {
     use std::rc::Rc;
 
     use serde::Deserialize;
-    use crate::transpiler::StringMap;
+
+    use crate::providers::Options;
 
     #[derive(Deserialize)]
     pub struct Manifest {
         pub project: Project,
-        pub services: Rc<StringMap<Rc<ServiceRef>>>, // map service_id -> service
+        pub services: Rc<Vec<Rc<ServiceRef>>>,
         pub terraform: Option<Terraform>,
+        pub registries: Option<Vec<Registry>>,
     }
 
     #[derive(Deserialize)]
@@ -28,6 +30,12 @@ pub mod asml {
     #[derive(Deserialize)]
     pub struct ServiceRef {
         pub name: String,
+    }
+
+    #[derive(Deserialize)]
+    pub struct Registry {
+        pub host: String,
+        pub options: Options,
     }
 
     impl Manifest {
@@ -54,9 +62,11 @@ pub mod service {
     use std::path::PathBuf;
     use std::rc::Rc;
     use std::sync::Arc;
+
     use serde::Deserialize;
+
     use crate::transpiler::StringMap;
-    
+
     #[derive(Deserialize)]
     pub struct Manifest {
         service: Rc<Service>,
@@ -104,13 +114,9 @@ pub mod service {
         }
     }
 
-    pub type Functions = StringMap<Function>;
-    pub type Iomods = StringMap<Dependency>;
-    pub type Authorizers = StringMap<HttpAuth>;
-
-    fn default_api_provider() -> String {
-        String::from("aws-apigw")
-    }
+    pub type Functions = Vec<Function>;
+    pub type Iomods = Vec<Dependency>;
+    pub type Authorizers = Vec<HttpAuth>;
 
     #[derive(Deserialize)]
     pub struct Provider {
@@ -137,14 +143,13 @@ pub mod service {
 
     #[derive(Deserialize)]
     pub struct Api {
-        #[serde(default = "default_api_provider")]
-        pub provider: String,
-        pub functions: Rc<StringMap<Function>>, // map function_id -> function
-        pub authorizers: Option<Rc<StringMap<HttpAuth>>> // map auth_id -> authorizer
+        pub functions: Rc<Vec<Function>>,
+        pub authorizers: Option<Rc<Vec<HttpAuth>>>,
     }
 
     #[derive(Deserialize)]
     pub struct HttpAuth {
+        pub id: String,
         pub auth_type: String,
         pub audience: Rc<Option<Rc<Vec<String>>>>,
         pub scopes: Rc<Option<Rc<Vec<String>>>>,
@@ -162,9 +167,8 @@ pub mod service {
         pub name: String,
         #[serde(default)]
         pub provider: Rc<Provider>,
-        pub handler_name: Option<String>,
-        #[serde(default)]
-        pub enable_wasi: bool,
+        pub registry: Option<String>,
+        pub language: Option<String>,
 
         pub http: Rc<Option<HttpFunction>>,
         pub authorizer_id: Option<String>,
@@ -175,19 +179,12 @@ pub mod service {
 
     #[derive(Deserialize)]
     pub struct Iomod {
-        pub dependencies: Rc<StringMap<Dependency>>, // map dependency_id -> dependency
+        pub dependencies: Rc<Vec<Dependency>>,
     }
 
     #[derive(Clone, Deserialize)]
     pub struct Dependency {
-        #[serde(alias = "type", default = "default_dependency_type")]
-        pub dependency_type: Option<String>,
-        pub from: Option<String>,
         pub version: String,
         pub coordinates: String,
-    }
-
-    fn default_dependency_type() -> Option<String> {
-        Some("registry".to_string())
     }
 }
