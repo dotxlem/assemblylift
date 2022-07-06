@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+
 use macaroon::{Format, Macaroon, MacaroonKey};
 use macaroon::crypto::Encryptor;
 use serde::{Deserialize, Serialize};
@@ -8,20 +9,15 @@ use warp::reply::{Json, WithStatus};
 
 use assemblylift_core_entity::package::EntityManifest;
 
-struct VaultEncryptor;
-
-impl Encryptor for VaultEncryptor {
-    fn encrypt(with_key: MacaroonKey, clear_bytes: &[u8]) -> macaroon::Result<Vec<u8>> {
-        todo!()
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 struct MintRequest {
     pub id: String,
     pub location: String,
 }
 
+// TODO sketch out on paper how 1st/3rd party relate to assemblylift
+//      there isn't (probably) just one mint request really -- 3rd party discharge is slightly different
+//      either way any event 3rd party uses its own request/route
 fn mint_request(req: MintRequest) -> WithStatus<Vec<u8>> {
     let key = "dummy-key";
     let mut macaroon = Macaroon::create(
@@ -29,9 +25,6 @@ fn mint_request(req: MintRequest) -> WithStatus<Vec<u8>> {
         &key.into(),
         req.id.clone().into(),
     ).unwrap();
-    // TODO need to look keys up by their ID; where does this happen?
-    //      vault needs the ID, but also want to support anonymous literal
-    macaroon.add_third_party_caveat::<VaultEncryptor>(loc, key, id);
     let out = macaroon.serialize(Format::V2JSON).unwrap();
     warp::reply::with_status(out, StatusCode::OK)
 }
