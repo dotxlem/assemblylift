@@ -1,8 +1,10 @@
 use std::convert::Infallible;
 
+use aws_sdk_secretsmanager::{Client as SecretsManagerClient, Error, PKG_VERSION, Region};
 use macaroon::{Format, Macaroon, MacaroonKey};
 use macaroon::crypto::Encryptor;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use warp::Filter;
 use warp::http::{Response, StatusCode};
 use warp::reply::{Json, WithStatus};
@@ -13,30 +15,47 @@ use assemblylift_core_entity::package::EntityManifest;
 struct MintRequest {
     pub id: String,
     pub location: String,
+    pub policy_document: String,
 }
 
-// TODO sketch out on paper how 1st/3rd party relate to assemblylift
-//      there isn't (probably) just one mint request really -- 3rd party discharge is slightly different
-//      either way any event 3rd party uses its own request/route
-fn mint_request(req: MintRequest) -> WithStatus<Vec<u8>> {
-    let key = "dummy-key";
+// FIXME /mint assumes that we always want to mint from the root key (ie `key` is always the root key)
+//       but really we should look up the key from the id and use whatever that is
+fn mint_request(req: MintRequest, key: &str) -> WithStatus<Vec<u8>> {
     let mut macaroon = Macaroon::create(
         Some(req.location.clone()),
         &key.into(),
         req.id.clone().into(),
-    ).unwrap();
+    )
+    .unwrap();
+    macaroon.add_first_party_caveat(req.policy_document.clone().into());
     let out = macaroon.serialize(Format::V2JSON).unwrap();
     warp::reply::with_status(out, StatusCode::OK)
 }
 
+/// Each forge has a unique Root Key
+async fn get_root_key() -> String {
+    let shared_config = aws_config::load_from_env().await;
+    let client = SecretsManagerClient::new(&shared_config);
+    let value = client
+        .get_secret_value()
+        .secret_id("test/asml/forge")
+        .send()
+        .await
+        .expect("could not get secret");
+    let json: Value =
+        serde_json::from_str(&value.secret_string.expect("could not get secret as string"))
+            .unwrap();
+    json.get("root").unwrap().as_str().unwrap().to_string()
+}
+
 #[tokio::main]
 async fn main() {
+    let key = get_root_key().await;
+
     let mint = warp::post()
         .and(warp::path("mint"))
         .and(warp::body::json())
-        .map(mint_request);
+        .map(move |req| mint_request(req, &key));
 
-    warp::serve(mint)
-        .run(([100, 66, 60, 79], 3030))
-        .await;
+    warp::serve(mint).run(([0, 0, 0, 0], 3030)).await;
 }

@@ -9,7 +9,7 @@ members = [
     "core/guest",
     "core/guest/macros",
     "core/entity",
-    "core/entity/wasm",
+    "core/entity/eval",
     "core/entity/forge",
     "core/iomod",
     "core/iomod/guest",

@@ -1,18 +1,15 @@
 [package]
-name = "assemblylift-core-entity-wasm"
+name = "assemblylift-core-entity-eval"
 version = "0.0.0"
-description = "AssemblyLift core entity WASM module"
-edition = "2018"
+description = "AssemblyLift Core Entity token-policy evaluator"
+edition = "2021"
 license-file = "../../LICENSE.md"
 repository = "https://github.com/akkoro/assemblylift"
 readme = "README.md"
-
-[lib]
-path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 #macaroon = { git = "https://github.com/deislabs/libmacaroon-rs", rev = "32e8aed" }
 #macaroon = { git = "https://github.com/akkoro/macaroon", branch = "ring-crypto" }
 macaroon = { version = "0.3.0-alpha", path = "../../../../../Forks/macaroon" }
 serde = { version = "1.0", features = ["derive"] }
+wasmer = "2.3"
