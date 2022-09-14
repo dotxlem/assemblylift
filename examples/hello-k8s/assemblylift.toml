@@ -1,0 +1,11 @@
+[project]
+name = "hello-k8s"
+
+[[services]]
+name = "hello"
+
+[[registries]]
+host = "ecr"
+[registries.options]
+aws_account_id = "1234567890"
+aws_region = "us-east-1"

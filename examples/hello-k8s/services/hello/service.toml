@@ -1,0 +1,16 @@
+[service]
+name = "hello"
+
+[service.provider]
+name = "k8s"
+
+[[api.functions]]
+name = "rust"
+language = "rust"
+# NOTE verb is currently ignored by the k8s implementation (i.e. always ANY)
+http = { verb = "GET", path = "/rust" }
+
+[[api.functions]]
+name = "ruby"
+language = "ruby"
+http = { verb = "GET", path = "/ruby" }
