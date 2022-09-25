@@ -18,3 +18,4 @@ members = [
     "core/io/common",
     "cli"
 ]
+exclude = ["examples"]

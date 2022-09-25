@@ -1,16 +1,21 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use clap::crate_version;
 use handlebars::Handlebars;
+use itertools::Itertools;
+use once_cell::sync::Lazy;
 use serde::Serialize;
 
-use crate::providers::{gloo, Options, Provider, ProviderError};
+use crate::providers::{DNS_PROVIDERS, flatten, gloo, KUBERNETES_PROVIDER_NAME, LockBox, Options, Provider, ProviderError, ProviderMap};
 use crate::tools::glooctl::GlooCtl;
-use crate::transpiler::{Artifact, Bindable, Castable, CastError, ContentType, context, Template};
+use crate::transpiler::{
+    Artifact, Bindable, Bootable, Castable, CastError, ContentType, context, Template,
+};
 use crate::transpiler::context::Context;
 
-fn map_container_registry(r: &context::Registry) -> ContainerRegistry {
+fn to_container_registry(r: &context::Registry) -> ContainerRegistry {
     ContainerRegistry {
         is_dockerhub: r.host.eq_ignore_ascii_case("dockerhub"),
         is_ecr: r.host.eq_ignore_ascii_case("ecr"),
@@ -19,12 +24,20 @@ fn map_container_registry(r: &context::Registry) -> ContainerRegistry {
 }
 
 pub struct KubernetesProvider {
+    api_provider: Arc<gloo::ApiProvider>,
+    service_subprovider: KubernetesService,
     options: Arc<Options>,
 }
 
 impl KubernetesProvider {
     pub fn new() -> Self {
+        let api_provider = Arc::new(gloo::ApiProvider::new());
         Self {
+            api_provider: api_provider.clone(),
+            service_subprovider: KubernetesService {
+                api_provider: api_provider.clone(),
+                options: Arc::new(Options::new()),
+            },
             options: Arc::new(Options::new()),
         }
     }
@@ -32,7 +45,7 @@ impl KubernetesProvider {
 
 impl Provider for KubernetesProvider {
     fn name(&self) -> String {
-        String::from("k8s")
+        String::from(KUBERNETES_PROVIDER_NAME)
     }
 
     fn options(&self) -> Arc<Options> {
@@ -40,7 +53,8 @@ impl Provider for KubernetesProvider {
     }
 
     fn set_options(&mut self, opts: Arc<Options>) -> Result<(), ProviderError> {
-        self.options = opts;
+        self.options = opts.clone();
+        self.service_subprovider.options = opts.clone();
         Ok(())
     }
 }
@@ -48,26 +62,19 @@ impl Provider for KubernetesProvider {
 // TODO kube context name as provider option
 impl Castable for KubernetesProvider {
     fn cast(&self, ctx: Rc<Context>, _selector: Option<&str>) -> Result<Vec<Artifact>, CastError> {
-        let service_subprovider = KubernetesService {
-            options: self.options.clone(),
-        };
-
-        let registries = ctx.registries.iter().map(map_container_registry).collect();
+        GlooCtl::default().install_gateway();
+        let registries = ctx.registries.iter().map(to_container_registry).collect();
 
         let mut service_artifacts = ctx
             .services
             .iter()
+            .filter(|&s| s.provider.name == self.name())
             .map(|s| {
-                service_subprovider
+                self.service_subprovider
                     .cast(ctx.clone(), Some(&s.name))
                     .unwrap()
             })
-            .reduce(|mut accum, mut v| {
-                let mut out = Vec::new();
-                out.append(&mut accum);
-                out.append(&mut v);
-                out
-            })
+            .reduce(flatten)
             .unwrap();
 
         let base_tmpl = KubernetesBaseTemplate {
@@ -86,19 +93,35 @@ impl Castable for KubernetesProvider {
         };
 
         let mut out = vec![hcl];
+
         out.append(&mut service_artifacts);
         Ok(out)
     }
 }
 
 impl Bindable for KubernetesProvider {
-    fn bind(&self, _ctx: Rc<Context>) -> Result<(), CastError> {
-        GlooCtl::default().install_gateway();
+    fn bind(&self, ctx: Rc<Context>) -> Result<(), CastError> {
+        ctx.services
+            .iter()
+            .filter(|&s| s.provider.name == self.name())
+            .map(|s| self.service_subprovider.bind(ctx.clone()))
+            .collect_vec();
         Ok(())
     }
 }
 
+impl Bootable for KubernetesProvider {
+    fn boot(&self, ctx: Rc<Context>) -> Result<(), CastError> {
+        self.api_provider.boot(ctx)
+    }
+
+    fn is_booted(&self, ctx: Rc<Context>) -> bool {
+        self.api_provider.is_booted(ctx)
+    }
+}
+
 struct KubernetesService {
+    api_provider: Arc<gloo::ApiProvider>,
     options: Arc<Options>,
 }
 
@@ -108,7 +131,7 @@ impl Castable for KubernetesService {
             .expect("selector must be a service name")
             .to_string();
 
-        let registries = ctx.registries.iter().map(map_container_registry).collect();
+        let registries = ctx.registries.iter().map(to_container_registry).collect();
 
         let hcl_content = ServiceTemplate {
             project_name: ctx.project.name.clone(),
@@ -123,10 +146,10 @@ impl Castable for KubernetesService {
         .render();
 
         // TODO in future we want to support other API Gateway providers -- for now, just Gloo :)
-        let api_provider = gloo::ApiProvider::new();
-        let mut api_artifacts = api_provider.cast(ctx.clone(), Some(&*name)).unwrap();
+        let mut api_artifacts = self.api_provider.cast(ctx.clone(), Some(&*name)).unwrap();
 
         let function_subprovider = KubernetesFunction {
+            service_name: name.clone(),
             options: self.options.clone(),
         };
         let function_artifacts = ctx
@@ -138,12 +161,7 @@ impl Castable for KubernetesService {
                     .cast(ctx.clone(), Some(&f.name))
                     .unwrap()
             })
-            .reduce(|mut accum, mut v| {
-                let mut out = Vec::new();
-                out.append(&mut accum);
-                out.append(&mut v);
-                out
-            })
+            .reduce(flatten)
             .unwrap();
         let function_hcl = function_artifacts
             .iter()
@@ -170,7 +188,14 @@ impl Castable for KubernetesService {
     }
 }
 
+impl Bindable for KubernetesService {
+    fn bind(&self, ctx: Rc<Context>) -> Result<(), CastError> {
+        self.api_provider.bind(ctx)
+    }
+}
+
 struct KubernetesFunction {
+    service_name: String,
     options: Arc<Options>,
 }
 
@@ -179,7 +204,12 @@ impl Castable for KubernetesFunction {
         let name = selector
             .expect("selector must be a function name")
             .to_string();
-        match ctx.functions.iter().find(|&f| f.name == name) {
+        match ctx
+            .functions
+            .iter()
+            .filter(|&f| f.service_name == self.service_name)
+            .find(|&f| f.name == name)
+        {
             Some(function) => {
                 let service = function.service_name.clone();
 
@@ -201,7 +231,7 @@ impl Castable for KubernetesFunction {
                     .collect();
 
                 let registries: Vec<ContainerRegistry> =
-                    ctx.registries.iter().map(map_container_registry).collect();
+                    ctx.registries.iter().map(to_container_registry).collect();
 
                 let hcl_tmpl = FunctionTemplate {
                     base_image_version: crate_version!().to_string(),
@@ -209,7 +239,7 @@ impl Castable for KubernetesFunction {
                     function_name: function.name.clone(),
                     service_name: service.clone(),
                     handler_name: match function.language.as_str() {
-                        "rust" => format!("{}.wasm.bin", function.name.clone()),
+                        "rust" => format!("{}.wasmu", function.name.clone()),
                         "ruby" => "ruby.wasmu".into(),
                         _ => "handler".into(),
                     },
@@ -289,21 +319,21 @@ impl Template for KubernetesBaseTemplate {
         r#"# AssemblyLift K8S Provider Begin
 
 provider kubernetes {
-    alias       = "{{project_name}}"
+    alias       = "{{project_name}}-k8s"
     config_path = pathexpand("~/.kube/config")
 }
 
 {{#each registries}}{{#if this.is_ecr}}provider aws {
-    alias  = "{{../project_name}}"
+    alias  = "{{../project_name}}-k8s"
     region = "{{this.options.aws_region}}"
-}{{/if}}
+}
 
-{{#if this.is_ecr}}data aws_ecr_authorization_token token {
-    provider = aws.{{../project_name}}
+data aws_ecr_authorization_token token {
+    provider = aws.{{../project_name}}-k8s
 }{{/if}}{{/each}}
 
 provider docker {
-    alias = "{{project_name}}"
+    alias = "{{project_name}}-k8s"
     {{#each registries}}{{#if this.is_dockerhub}}registry_auth {
         address     = "registry-1.docker.io"
         config_file = pathexpand("{{../docker_config_path}}")
@@ -340,14 +370,14 @@ impl Template for ServiceTemplate {
         r#"# Begin service `{{service_name}}`
 
 resource kubernetes_namespace {{service_name}} {
-    provider = kubernetes.{{project_name}}
+    provider = kubernetes.{{project_name}}-k8s
     metadata {
         name = "asml-${local.project_name}-{{service_name}}"
     }
 }
 
 {{#each registries}}{{#if is_ecr}}resource kubernetes_secret dockerconfig_{{../service_name}}_ecr {
-  provider = kubernetes.{{../project_name}}
+  provider = kubernetes.{{../project_name}}-k8s
   metadata {
       name      = "regcred-ecr"
       namespace = "asml-${local.project_name}-{{../service_name}}"
@@ -367,7 +397,7 @@ resource kubernetes_namespace {{service_name}} {
   type = "kubernetes.io/dockerconfigjson"
 }{{/if}}
 {{#if is_dockerhub}}resource kubernetes_secret dockerconfig_{{../service_name}}_dockerhub {
-  provider = kubernetes.{{../project_name}}
+  provider = kubernetes.{{../project_name}}-k8s
   metadata {
       name      = "regcred-dockerhub"
       namespace = "asml-${local.project_name}-{{../service_name}}"
@@ -421,15 +451,9 @@ locals {
 }
 
 {{#if registry.is_ecr}}resource aws_ecr_repository {{service_name}}_{{function_name}} {
-    provider = aws.{{project_name}}
+    provider = aws.{{project_name}}-k8s
     name     = "asml/${local.project_name}/{{service_name}}/{{function_name}}"
 }{{/if}}
-
-data archive_file {{service_name}}_{{function_name}}_iomods {
-    type        = "zip"
-    source_dir  = "${path.module}/services/{{service_name}}/iomods"
-    output_path = "${path.module}/services/{{service_name}}/iomods.zip"
-}
 
 {{#if is_ruby}}data archive_file {{service_name}}_{{function_name}}_rubysrc {
     type        = "zip"
@@ -442,13 +466,12 @@ resource random_id {{service_name}}_{{function_name}}_image {
     keepers = {
         dockerfile_hash = filebase64sha256("${path.module}/services/{{service_name}}/{{function_name}}/Dockerfile")
         wasm_hash       = filebase64sha256("${path.module}/services/{{service_name}}/{{function_name}}/{{handler_name}}")
-        iomods_hash     = data.archive_file.{{service_name}}_{{function_name}}_iomods.output_sha
         {{#if is_ruby}}rubysrc_hash    = data.archive_file.{{service_name}}_{{function_name}}_rubysrc.output_sha{{/if}}
     }
 }
 
 resource docker_registry_image {{service_name}}_{{function_name}} {
-    provider = docker.{{project_name}}
+    provider = docker.{{project_name}}-k8s
     {{#if registry.is_dockerhub}}name = "{{registry.options.registry_name}}/${local.{{service_name}}_{{function_name}}_image_name}:${random_id.{{service_name}}_{{function_name}}_image.hex}"{{/if}}
     {{#if registry.is_ecr}}name = "${aws_ecr_repository.{{service_name}}_{{function_name}}.repository_url}:${random_id.{{service_name}}_{{function_name}}_image.hex}"{{/if}}
 
@@ -461,7 +484,7 @@ resource docker_registry_image {{service_name}}_{{function_name}} {
 }
 
 resource kubernetes_deployment {{function_name}} {
-    provider   = kubernetes.{{project_name}}
+    provider   = kubernetes.{{project_name}}-k8s
     depends_on = [docker_registry_image.{{service_name}}_{{function_name}}, kubernetes_namespace.{{service_name}}]
     metadata {
         name      = "{{function_name}}"
@@ -516,7 +539,7 @@ resource kubernetes_deployment {{function_name}} {
 }
 
 resource kubernetes_service {{service_name}}_{{function_name}} {
-    provider   = kubernetes.{{project_name}}
+    provider   = kubernetes.{{project_name}}-k8s
     depends_on = [kubernetes_namespace.{{service_name}}]
 
     metadata {
@@ -559,12 +582,12 @@ impl Template for DockerfileTemplate {
     }
 
     fn tmpl() -> &'static str {
-        r#"FROM public.ecr.aws/akkoro/assemblylift/hyper-alpine:0.4.0-alpha.2
+        r#"FROM public.ecr.aws/akkoro/assemblylift/hyper-alpine:{{base_image_version}}
 ENV ASML_WASM_MODULE_NAME {{handler_name}}
+{{#if is_ruby}}ENV ASML_FUNCTION_ENV ruby-docker{{/if}}
 ADD ./{{function_name}}/{{handler_name}} /opt/assemblylift/{{handler_name}}
-{{#if is_ruby}}COPY ./{{function_name}}/ruby-wasm32-wasi /usr/bin/ruby-wasm32-wasi
-COPY ./{{function_name}}/rubysrc/* /usr/bin/ruby-wasm32-wasi/src/
-ENV ASML_FUNCTION_ENV ruby{{/if}}
+{{#if is_ruby}}COPY ./ruby-wasm32-wasi /usr/bin/ruby-wasm32-wasi
+COPY ./{{function_name}}/rubysrc/* /usr/bin/ruby-wasm32-wasi/src/{{/if}}
 "#
     }
 }

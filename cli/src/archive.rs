@@ -26,53 +26,11 @@ impl fmt::Display for ArchiveError {
     }
 }
 
-pub fn zip_files(
-    files_in: Vec<impl AsRef<Path>>,
+pub fn zip_dirs(
+    dirs_in: Vec<PathBuf>,
     file_out: impl AsRef<Path>,
-    prefix_path: Option<&str>,
-    ro: bool,
-) {
-    let file = match fs::File::create(&file_out) {
-        Ok(file) => file,
-        Err(why) => panic!("could not create zip archive: {}", why.to_string()),
-    };
-
-    let mut zip = zip::ZipWriter::new(file);
-    let options = FileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored)
-        .unix_permissions(if ro == true { 0o444 } else { 0o777 }); // read-only or full access
-
-    for path in files_in {
-        let mut file_bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(why) => panic!(
-                "could read file at {:?}: {}",
-                path.as_ref(),
-                why.to_string()
-            ),
-        };
-
-        // unwrap: path always has a file name at this point
-        let path_str = path.as_ref().file_name().unwrap().to_str().unwrap();
-
-        let mut zip_path = String::from(path_str);
-        if prefix_path.is_some() {
-            zip_path = format!("{}{}", prefix_path.unwrap(), path_str);
-        }
-
-        if let Err(why) = zip.start_file(&zip_path, options) {
-            panic!("could not create zip archive: {}", why.to_string())
-        }
-
-        if let Err(why) = zip.write_all(file_bytes.as_mut_slice()) {
-            panic!("could not create zip archive: {}", why.to_string())
-        }
-    }
-
-    println!("🗜  > Wrote zip artifact {}", file_out.as_ref().display());
-}
-
-pub fn zip_dir(dir_in: PathBuf, file_out: impl AsRef<Path>) -> Result<(), ()> {
+    exclude_files_named: Vec<&str>,
+) -> Result<(), ()> {
     use walkdir::WalkDir;
 
     let file = match fs::File::create(&file_out) {
@@ -81,24 +39,38 @@ pub fn zip_dir(dir_in: PathBuf, file_out: impl AsRef<Path>) -> Result<(), ()> {
     };
 
     let mut zip = zip::ZipWriter::new(file);
-    let options = FileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored)
-        .unix_permissions(0o777); 
-    
-    for entry in WalkDir::new(dir_in.clone()).into_iter().filter_map(|e| e.ok()) {
-        let zip_path = entry.path().to_str().unwrap().replace(dir_in.to_str().unwrap(), "");
+    let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
-        let mut file_bytes = match fs::read(&entry.path()) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
+    for dir in dirs_in {
+        for entry in WalkDir::new(dir.clone()).into_iter().filter_map(|e| e.ok()) {
+            if exclude_files_named
+                .iter()
+                .find(|&f| f == &entry.file_name().to_str().unwrap())
+                .is_none()
+            {
+                let mut root_dir_up = dir.clone();
+                root_dir_up.pop();
+                let zip_path = entry
+                    .path()
+                    .to_str()
+                    .unwrap()
+                    .replace(root_dir_up.to_str().unwrap(), "");
 
-        zip.start_file(&format!(".{}", zip_path), options).expect("could not create zip archive");
-        zip.write_all(file_bytes.as_mut_slice()).expect("could not create zip archive");
+                let mut file_bytes = match fs::read(&entry.path()) {
+                    Ok(bytes) => bytes,
+                    Err(_) => continue,
+                };
+
+                zip.start_file(&format!("{}", zip_path), options)
+                    .expect("could not create zip archive");
+                zip.write_all(file_bytes.as_mut_slice())
+                    .expect("could not create zip archive");
+            }
+        }
     }
 
     println!("🗜  > Wrote zip artifact {}", file_out.as_ref().display());
-    
+
     Ok(())
 }
 
