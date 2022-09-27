@@ -41,16 +41,15 @@ fn ui(f: &mut Frame<CrosstermBackend<Stdout>>) {
         .direction(Direction::Vertical)
         .constraints(
             [
-                Constraint::Percentage(10),
-                Constraint::Percentage(80),
-                Constraint::Percentage(10),
+                Constraint::Percentage(15),
+                Constraint::Percentage(85),
             ]
                 .as_ref(),
         )
         .split(f.size());
 
-    let block = Block::default().title("Block").borders(Borders::ALL);
+    let block = Block::default().borders(Borders::BOTTOM);
     f.render_widget(block, chunks[0]);
     let block = Block::default().title("Block 2").borders(Borders::ALL);
-    f.render_widget(block, chunks[2]);
+    f.render_widget(block, chunks[1]);
 }
