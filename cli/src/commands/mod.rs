@@ -7,4 +7,5 @@ pub mod r#move;
 pub mod nuke;
 pub mod pack;
 pub mod push;
+pub mod term;
 pub mod user;

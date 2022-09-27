@@ -2,7 +2,7 @@ extern crate serde_json;
 
 use clap::{App, AppSettings, Arg, crate_version};
 
-use crate::commands::{bind, burn, cast, init, make, nuke, pack, push, r#move, user};
+use crate::commands::{bind, burn, cast, init, make, nuke, pack, push, r#move, term, user};
 
 mod archive;
 mod commands;
@@ -124,6 +124,10 @@ fn main() {
                     App::new("login")
                         .about("Login to the IOmod registry")
                 ),
+        )
+        .subcommand(
+            App::new("term")
+                .about("Terminal UI [EXPERIMENTAL]"),
         );
     let matches = app.setting(AppSettings::ArgRequiredElseHelp).get_matches();
 
@@ -137,6 +141,7 @@ fn main() {
         ("nuke", matches) => nuke::command(matches),
         ("pack", matches) => pack::command(matches),
         ("push", matches) => push::command(matches),
+        ("term", matches) => term::command(matches),
         ("user", matches) => user::command(matches),
         (cmd, _) => println!("Invalid subcommand `{}`. Try `asml help` for options.", cmd),
     }
