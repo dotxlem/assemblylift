@@ -1,25 +1,25 @@
-mod app;
-
 use std::io;
 use std::io::Stdout;
 use std::rc::Rc;
 
-use clap::{crate_version, ArgMatches};
+use clap::{ArgMatches, crate_version};
+use crossterm::{event, execute};
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use crossterm::{event, execute};
 use itertools::Itertools;
+use tui::{Frame, Terminal};
 use tui::backend::CrosstermBackend;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::{Color, Modifier, Style};
 use tui::widgets::{Block, Borders, List, ListItem, Paragraph};
-use tui::{Frame, Terminal};
 
 use crate::projectfs::Project;
 use crate::term::app::App;
 use crate::transpiler::toml::asml::Manifest;
+
+mod app;
 
 pub fn command(_matches: Option<&ArgMatches>) {
     enable_raw_mode().expect("could not enable terminal raw mode");
@@ -39,6 +39,10 @@ pub fn command(_matches: Option<&ArgMatches>) {
     )
     .unwrap();
     terminal.show_cursor().unwrap();
+
+    if let Err(error) = res {
+        println!("AssemblyLift Terminal exited with error: {:?}", error.to_string());
+    }
 }
 
 fn run_term(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::Result<()> {
