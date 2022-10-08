@@ -41,16 +41,17 @@ async fn main() {
     registry::spawn_registry(rx).unwrap();
 
     // load plugins from runtime dir, which should contain merged contents of Lambda layers
-    if let Ok(rd) = fs::read_dir("/opt/iomod") {
+    if let Ok(rd) = fs::read_dir("/opt") {
         for entry in rd {
             let entry = entry.unwrap();
+            println!("DEBUG entry={:?}", entry);
             if entry.file_type().unwrap().is_file() {
                 // this makes the assumption that the
                 // IOmod entrypoint is always an executable binary
-                match entry.path().extension() {
-                    Some(os_str) => match os_str.to_str() {
-                        Some("iomod") => {
-                            let file = fs::File::open(&entry.path()).unwrap();
+                if let Some(os_path) = entry.path().extension() {
+                    if let Some(ext) = os_path.to_str() {
+                        if ext == "iomod" {
+                            let file = File::open(&entry.path()).unwrap();
                             let reader = BufReader::new(file);
                             let archive = RefCell::new(zip::ZipArchive::new(reader).unwrap());
                             let mut manifest_str: String = Default::default();
@@ -76,34 +77,34 @@ async fn main() {
                                     iomod_manifest.iomod.version,
                                     entrypoint
                                 );
-                                let path = std::path::Path::new(path);
-                                {
-                                    let path_prefix = path.parent().unwrap();
-                                    fs::create_dir_all(path_prefix).expect(&*format!(
-                                        "unable to create directory {:?}",
-                                        path_prefix
-                                    ));
-                                    let mut entrypoint_file = File::create(path)
-                                        .expect(&*format!("unable to create file at {:?}", path));
-                                    std::io::copy(&mut entrypoint_binary, &mut entrypoint_file)
-                                        .expect("unable to copy entrypoint");
-                                    let mut perms: std::fs::Permissions =
-                                        fs::metadata(&path).unwrap().permissions();
-                                    perms.set_mode(0o755);
-                                    entrypoint_file.set_permissions(perms)
+                                let path = Path::new(path);
+                                if !path.exists() {
+                                    {
+                                        let path_prefix = path.parent().unwrap();
+                                        fs::create_dir_all(path_prefix).expect(&*format!(
+                                            "unable to create directory {:?}",
+                                            path_prefix
+                                        ));
+                                        let mut entrypoint_file = File::create(path)
+                                            .expect(&*format!("unable to create file at {:?}", path));
+                                        std::io::copy(&mut entrypoint_binary, &mut entrypoint_file)
+                                            .expect("unable to copy entrypoint");
+                                        let mut perms: fs::Permissions =
+                                            fs::metadata(&path).unwrap().permissions();
+                                        perms.set_mode(0o755);
+                                        entrypoint_file.set_permissions(perms)
                                             .expect("could not set IOmod binary executable (octal 755) permissions");
+                                    }
+                                    process::Command::new(path).spawn().unwrap();
                                 }
-                                process::Command::new(path).spawn().unwrap();
                             }
                         }
-                        _ => {}
-                    },
-                    None => {
-                        process::Command::new(entry.path()).spawn().unwrap();
                     }
                 }
             }
         }
+    } else {
+        println!("WARN Could not find dir /opt/iomod");
     }
 
     let module_path = env::var("LAMBDA_TASK_ROOT").unwrap();

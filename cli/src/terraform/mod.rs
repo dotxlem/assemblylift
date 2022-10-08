@@ -13,8 +13,6 @@ pub fn relative_binary_path() -> &'static str {
 pub fn fetch(project_path: &PathBuf) {
     use std::io::Read;
 
-    fs::create_dir_all("./.asml/runtime").unwrap();
-
     let terraform_path = format!(
         "{}/{}",
         project_path.clone().into_os_string().into_string().unwrap(),
@@ -35,12 +33,12 @@ pub fn fetch(project_path: &PathBuf) {
 
     #[cfg(target_os = "linux")]
     let mut response = reqwest::blocking::get(
-        "https://releases.hashicorp.com/terraform/0.14.8/terraform_0.14.8_linux_amd64.zip",
+        "https://releases.hashicorp.com/terraform/1.3.2/terraform_1.3.2_linux_amd64.zip",
     )
     .unwrap();
     #[cfg(target_os = "macos")]
     let mut response = reqwest::blocking::get(
-        "https://releases.hashicorp.com/terraform/0.14.8/terraform_0.14.8_darwin_amd64.zip",
+        "https://releases.hashicorp.com/terraform/1.3.2/terraform_1.3.2_darwin_amd64.zip",
     )
     .unwrap();
 
