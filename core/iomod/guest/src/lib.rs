@@ -32,7 +32,7 @@ pub mod macros {
                 let ioid: i32;
                 unsafe {
                     let serialized: Box<Vec<u8>> = Box::from(serde_json::to_vec(&input).unwrap());
-                    ioid = crate::__asml_abi_invoke(
+                    ioid = crate::__asml_abi_io_invoke(
                         method_path.as_ptr(),
                         method_path.len(),
                         serialized.as_ptr(),

@@ -1,14 +1,20 @@
-use std::future::Future;
+#![no_std]
+
+extern crate alloc;
+
+use alloc::boxed::Box;
+use alloc::string::String;
+use core::future::Future;
 use std::io::BufReader;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
+use core::marker::PhantomData;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 
 use serde::{de::DeserializeOwned, Deserialize};
 
 use assemblylift_core_io_common::constants::{FUNCTION_INPUT_BUFFER_SIZE, IO_BUFFER_SIZE_BYTES};
 
-/// The ABI exported by the AssemblyLift runtime host
+// The ABI exported by the AssemblyLift runtime host
 extern "C" {
     // IO
     fn __asml_abi_io_poll(id: u32) -> i32;
@@ -99,7 +105,7 @@ impl std::io::Read for IoDocument {
 }
 
 #[derive(Clone)]
-/// A handle implementing `std::future::Future` for an in-flight IOmod call
+/// A handle implementing `core::future::Future` for an in-flight IOmod call
 pub struct Io<'a, R> {
     pub id: u32,
     waker: Box<Option<Waker>>,
