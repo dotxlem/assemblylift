@@ -1,10 +1,10 @@
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
 use wasmer::{
-    imports, ChainableNamedResolver, CpuFeature, Cranelift, Function, ImportObject, Instance,
+    ChainableNamedResolver, CpuFeature, Cranelift, Function, ImportObject, imports, Instance,
     InstantiationError, Module, NamedResolverChain, Store, Target, Triple, Universal,
 };
 use wasmer_wasi::WasiState;
@@ -16,6 +16,13 @@ use crate::threader::ThreaderEnv;
 
 pub type ModuleTreble<S> = (Module, Resolver, ThreaderEnv<S>);
 pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
+
+pub trait WasmModule {
+    fn deserialize_from_path(&self, path: dyn AsRef<Path>) -> anyhow::Result<()>;
+    fn deserialize_from_bytes(&self, bytes: &[u8]) -> anyhow::Result<()>;
+    fn build(&self) -> anyhow::Result<()>;
+    fn instantiate(&self) -> anyhow::Result<()>;
+}
 
 pub fn deserialize_module_from_path<R, S>(
     module_path: &str,
