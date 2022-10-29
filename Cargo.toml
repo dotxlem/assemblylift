@@ -13,6 +13,8 @@ members = [
     "core/io",
     "core/io/guest",
     "core/io/common",
+    "core/wasmer",
+    "core/wasmtime",
     "cli"
 ]
 exclude = ["examples"]

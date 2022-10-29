@@ -1,0 +1,8 @@
+[package]
+name = "assemblylift-core-wasmtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+assemblylift-core = { version = "0.4.0-alpha.10", path = "../../core" }
+wasmtime = "2.0"

@@ -1,0 +1,10 @@
+[package]
+name = "assemblylift-core-wasmer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+assemblylift-core = { version = "0.4.0-alpha.10", path = "../../core" }
+anyhow = "1.0"
+wasmer = "2.3"
+wasmer-wasi = "2.3"

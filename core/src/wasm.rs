@@ -18,8 +18,8 @@ pub type ModuleTreble<S> = (Module, Resolver, ThreaderEnv<S>);
 pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
 
 pub trait WasmModule {
-    fn deserialize_from_path(&self, path: dyn AsRef<Path>) -> anyhow::Result<()>;
-    fn deserialize_from_bytes(&self, bytes: &[u8]) -> anyhow::Result<()>;
+    fn deserialize_from_path<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()>;
+    fn deserialize_from_bytes<B: AsRef<[u8]>>(&self, bytes: B) -> anyhow::Result<()>;
     fn build(&self) -> anyhow::Result<()>;
     fn instantiate(&self) -> anyhow::Result<()>;
 }
