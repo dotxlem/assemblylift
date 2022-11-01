@@ -1,10 +1,10 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 
 use wasmer::{
-    ChainableNamedResolver, CpuFeature, Cranelift, Function, ImportObject, imports, Instance,
+    imports, ChainableNamedResolver, CpuFeature, Cranelift, Function, ImportObject, Instance,
     InstantiationError, Module, NamedResolverChain, Store, Target, Triple, Universal,
 };
 use wasmer_wasi::WasiState;
@@ -12,16 +12,31 @@ use wasmer_wasi::WasiState;
 use assemblylift_core_iomod::registry::RegistryTx;
 
 use crate::abi::*;
-use crate::threader::ThreaderEnv;
+use crate::threader::{Threader, ThreaderEnv};
 
 pub type ModuleTreble<S> = (Module, Resolver, ThreaderEnv<S>);
 pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
 
 pub trait WasmModule {
-    fn deserialize_from_path<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()>;
-    fn deserialize_from_bytes<B: AsRef<[u8]>>(&self, bytes: B) -> anyhow::Result<()>;
-    fn build(&self) -> anyhow::Result<()>;
+    fn deserialize_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self>
+    where
+        Self: Sized;
+    fn deserialize_from_bytes<B: AsRef<[u8]>>(bytes: B) -> anyhow::Result<Self>
+    where
+        Self: Sized;
+    fn build<S: Clone + Send + Sized + 'static>(
+        &self,
+        registry_tx: RegistryTx,
+        status_tx: crossbeam_channel::Sender<S>,
+    ) -> anyhow::Result<()>;
     fn instantiate(&self) -> anyhow::Result<()>;
+}
+
+pub trait WasmState<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    fn threader(&self) -> MutexGuard<Threader<S>>;
 }
 
 pub fn deserialize_module_from_path<R, S>(

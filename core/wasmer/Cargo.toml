@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 assemblylift-core = { version = "0.4.0-alpha.10", path = "../../core" }
 anyhow = "1.0"
+crossbeam-channel = "0.5"
 wasmer = "2.3"
 wasmer-wasi = "2.3"
