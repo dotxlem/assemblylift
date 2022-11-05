@@ -13,6 +13,7 @@ use wasmer::{Array, LazyInit, Memory, NativeFunc, WasmPtr, WasmerEnv};
 use assemblylift_core_iomod::registry::{RegistryChannelMessage, RegistryTx};
 
 use crate::buffers::{FunctionInputBuffer, IoBuffer, PagedWasmBuffer};
+use crate::wasm::WasmState;
 
 pub type IoId = u32;
 
@@ -90,7 +91,7 @@ where
     }
 
     /// Load the memory document associated with `ioid` into the guest IO memory
-    pub fn document_load(&mut self, env: &ThreaderEnv<S>, ioid: IoId) -> Result<(), ()> {
+    pub fn document_load(&mut self, env: &dyn WasmState<S>, ioid: IoId) -> Result<(), ()> {
         let doc = self.get_io_memory_document(ioid).unwrap();
         self.io_memory
             .lock()
@@ -101,7 +102,7 @@ where
     }
 
     /// Advance the guest IO memory to the next page
-    pub fn document_next(&mut self, env: &ThreaderEnv<S>) -> Result<(), ()> {
+    pub fn document_next(&mut self, env: &dyn WasmState<S>) -> Result<(), ()> {
         self.io_memory.lock().unwrap().buffer.next(env);
         Ok(())
     }

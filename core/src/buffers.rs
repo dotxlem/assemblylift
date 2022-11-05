@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use assemblylift_core_io_common::constants::{FUNCTION_INPUT_BUFFER_SIZE, IO_BUFFER_SIZE_BYTES};
 use wasmer::WasmCell;
 
-use crate::threader::ThreaderEnv;
+use crate::wasm::WasmState;
 
 /// A trait representing a linear byte buffer, such as Vec<u8>
 pub trait LinearBuffer {
@@ -26,7 +26,7 @@ pub trait LinearBuffer {
 pub trait WasmBuffer<S: Clone + Send + Sized + 'static> {
     fn copy_to_wasm(
         &self,
-        env: &ThreaderEnv<S>,
+        env: &dyn WasmState<S>,
         src: (usize, usize),
         dst: (usize, usize),
     ) -> Result<(), ()>;
@@ -34,8 +34,8 @@ pub trait WasmBuffer<S: Clone + Send + Sized + 'static> {
 
 /// Implement paging data into a `WasmBuffer`
 pub trait PagedWasmBuffer<S: Clone + Send + Sized + 'static>: WasmBuffer<S> {
-    fn first(&mut self, env: &ThreaderEnv<S>, offset: Option<usize>) -> i32;
-    fn next(&mut self, env: &ThreaderEnv<S>) -> i32;
+    fn first(&mut self, env: &dyn WasmState<S>, offset: Option<usize>) -> i32;
+    fn next(&mut self, env: &dyn WasmState<S>) -> i32;
 }
 
 pub struct FunctionInputBuffer {
@@ -88,7 +88,7 @@ impl<S> PagedWasmBuffer<S> for FunctionInputBuffer
 where
     S: Clone + Send + Sized + 'static,
 {
-    fn first(&mut self, env: &ThreaderEnv<S>, _offset: Option<usize>) -> i32 {
+    fn first(&mut self, env: &dyn WasmState<S>, _offset: Option<usize>) -> i32 {
         let end: usize = match self.buffer.len() < FUNCTION_INPUT_BUFFER_SIZE {
             true => self.buffer.len(),
             false => FUNCTION_INPUT_BUFFER_SIZE,
@@ -99,7 +99,7 @@ where
         0
     }
 
-    fn next(&mut self, env: &ThreaderEnv<S>) -> i32 {
+    fn next(&mut self, env: &dyn WasmState<S>) -> i32 {
         use std::cmp::min;
         if self.buffer.len() > FUNCTION_INPUT_BUFFER_SIZE {
             self.page_idx += 1;
@@ -126,27 +126,29 @@ where
 {
     fn copy_to_wasm(
         &self,
-        env: &ThreaderEnv<S>,
+        env: &dyn WasmState<S>,
         src: (usize, usize),
         dst: (usize, usize),
     ) -> Result<(), ()> {
-        let wasm_memory = env.memory_ref().unwrap();
-        let input_buffer = env
-            .get_function_input_buffer
-            .get_ref()
-            .unwrap()
-            .call()
-            .unwrap();
-        let memory_writer: Vec<WasmCell<u8>> = input_buffer
-            .deref(&wasm_memory, dst.0 as u32, dst.1 as u32)
-            .unwrap();
+        // let wasm_memory = env.memory_ref().unwrap();
+        // let input_buffer = env
+        //     .get_function_input_buffer
+        //     .get_ref()
+        //     .unwrap()
+        //     .call()
+        //     .unwrap();
+        // let memory_writer: Vec<WasmCell<u8>> = input_buffer
+        //     .deref(&wasm_memory, dst.0 as u32, dst.1 as u32)
+        //     .unwrap();
+        //
+        // for (i, b) in self.buffer[src.0..src.1].iter().enumerate() {
+        //     let idx = i + dst.0;
+        //     memory_writer[idx].set(*b);
+        // }
 
-        for (i, b) in self.buffer[src.0..src.1].iter().enumerate() {
-            let idx = i + dst.0;
-            memory_writer[idx].set(*b);
-        }
-
-        Ok(())
+        env.memory_write(dst.0, self.buffer[src.0..src.1])
+            .expect("could not write to linear memory");
+        Ok(()) // FIXME bubble up result
     }
 }
 
@@ -205,7 +207,7 @@ impl<S> PagedWasmBuffer<S> for IoBuffer
 where
     S: Clone + Send + Sized + 'static,
 {
-    fn first(&mut self, env: &ThreaderEnv<S>, offset: Option<usize>) -> i32 {
+    fn first(&mut self, env: &dyn WasmState<S>, offset: Option<usize>) -> i32 {
         self.active_buffer = offset.unwrap_or(0);
         self.page_indices.insert(self.active_buffer, 0usize);
 
@@ -218,7 +220,7 @@ where
         0
     }
 
-    fn next(&mut self, env: &ThreaderEnv<S>) -> i32 {
+    fn next(&mut self, env: &dyn WasmState<S>) -> i32 {
         let page_idx = self.page_indices.get(&self.active_buffer).unwrap() + 1;
         let page_offset = page_idx * IO_BUFFER_SIZE_BYTES;
         self.copy_to_wasm(
@@ -238,7 +240,7 @@ where
 {
     fn copy_to_wasm(
         &self,
-        env: &ThreaderEnv<S>,
+        env: &dyn WasmState<S>,
         src: (usize, usize),
         dst: (usize, usize),
     ) -> Result<(), ()> {

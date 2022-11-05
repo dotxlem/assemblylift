@@ -9,14 +9,16 @@ use wasmer::{Array, MemoryView, WasmPtr};
 use crate::buffers::{LinearBuffer, PagedWasmBuffer};
 use crate::threader::ThreaderEnv;
 use crate::{invoke_io, WasmBufferPtr};
+use crate::wasm::WasmState;
 
 pub type AsmlAbiFn<S> = fn(&ThreaderEnv<S>, WasmBufferPtr, WasmBufferPtr, u32) -> i32;
 
 pub trait RuntimeAbi<S: Clone + Send + Sized + 'static> {
-    fn log(env: &ThreaderEnv<S>, ptr: u32, len: u32);
-    fn success(env: &ThreaderEnv<S>, ptr: u32, len: u32);
+    fn log(env: &dyn WasmState<S>, ptr: u32, len: u32);
+    fn success(env: &dyn WasmState<S>, ptr: u32, len: u32);
 }
 
+/*
 fn to_io_error<E: Error>(err: E) -> io::Error {
     io::Error::new(ErrorKind::Other, err.to_string())
 }
@@ -208,3 +210,4 @@ where
 
     Ok(bytes)
 }
+*/

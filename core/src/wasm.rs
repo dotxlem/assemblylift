@@ -17,15 +17,15 @@ use crate::threader::{Threader, ThreaderEnv};
 pub type ModuleTreble<S> = (Module, Resolver, ThreaderEnv<S>);
 pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
 
-pub trait WasmModule {
+pub trait WasmModule<S> {
     fn deserialize_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self>
     where
         Self: Sized;
     fn deserialize_from_bytes<B: AsRef<[u8]>>(bytes: B) -> anyhow::Result<Self>
     where
         Self: Sized;
-    fn build<S: Clone + Send + Sized + 'static>(
-        &self,
+    fn build(
+        &mut self,
         registry_tx: RegistryTx,
         status_tx: crossbeam_channel::Sender<S>,
     ) -> anyhow::Result<()>;
@@ -37,8 +37,11 @@ where
     S: Clone + Send + Sized + 'static,
 {
     fn threader(&self) -> MutexGuard<Threader<S>>;
+    fn memory_read<B: AsRef<[u8]>>(&self, offset: usize, length: usize) -> anyhow::Result<B>;
+    fn memory_write<B: AsRef<[u8]>>(&self, offset: usize, bytes: B) -> anyhow::Result<usize>;
 }
 
+/*
 pub fn deserialize_module_from_path<R, S>(
     module_path: &str,
     module_name: &str,
@@ -193,3 +196,4 @@ pub fn precompile(module_path: PathBuf) -> Result<PathBuf, &'static str> {
         true => Ok(module_path),
     }
 }
+**/
