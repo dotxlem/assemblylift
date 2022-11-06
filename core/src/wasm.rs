@@ -12,9 +12,9 @@ use wasmer_wasi::WasiState;
 use assemblylift_core_iomod::registry::RegistryTx;
 
 use crate::abi::*;
-use crate::threader::{Threader, ThreaderEnv};
+use crate::threader::Threader;
 
-pub type ModuleTreble<S> = (Module, Resolver, ThreaderEnv<S>);
+// pub type ModuleTreble<B, S> = (Module, Resolver, ThreaderEnv<B, S>);
 pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
 
 pub trait WasmModule<S> {
@@ -32,13 +32,20 @@ pub trait WasmModule<S> {
     fn instantiate(&self) -> anyhow::Result<()>;
 }
 
-pub trait WasmState<S>
+pub trait WasmState<B, S>: WasmMemory<B>
 where
+    B: AsRef<[u8]>,
     S: Clone + Send + Sized + 'static,
 {
     fn threader(&self) -> MutexGuard<Threader<S>>;
-    fn memory_read<B: AsRef<[u8]>>(&self, offset: usize, length: usize) -> anyhow::Result<B>;
-    fn memory_write<B: AsRef<[u8]>>(&self, offset: usize, bytes: B) -> anyhow::Result<usize>;
+}
+
+pub trait WasmMemory<B>
+where
+    B: AsRef<[u8]>,
+{
+    fn memory_read(&self, offset: usize, length: usize) -> anyhow::Result<B>;
+    fn memory_write(&self, offset: usize, bytes: B) -> anyhow::Result<usize>;
 }
 
 /*

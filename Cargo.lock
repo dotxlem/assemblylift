@@ -266,6 +266,7 @@ dependencies = [
  "assemblylift-core",
  "assemblylift-core-iomod",
  "crossbeam-channel",
+ "itertools",
  "wasmer",
  "wasmer-wasi",
 ]

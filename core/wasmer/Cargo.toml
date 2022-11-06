@@ -8,5 +8,6 @@ assemblylift-core = { version = "0.4.0-alpha.10", path = "../../core" }
 assemblylift-core-iomod = { version = "0.4.0-alpha.0", path = "../../core/iomod" }
 anyhow = "1.0"
 crossbeam-channel = "0.5"
+itertools = "0.10"
 wasmer = "2.1"
 wasmer-wasi = "2.1"

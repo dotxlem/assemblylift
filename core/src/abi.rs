@@ -7,15 +7,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use wasmer::{Array, MemoryView, WasmPtr};
 
 use crate::buffers::{LinearBuffer, PagedWasmBuffer};
-use crate::threader::ThreaderEnv;
-use crate::{invoke_io, WasmBufferPtr};
+// use crate::threader::ThreaderEnv;
+// use crate::{invoke_io, WasmBufferPtr};
 use crate::wasm::WasmState;
 
-pub type AsmlAbiFn<S> = fn(&ThreaderEnv<S>, WasmBufferPtr, WasmBufferPtr, u32) -> i32;
+// pub type AsmlAbiFn<B, S> = fn(&ThreaderEnv<B, S>, WasmBufferPtr, WasmBufferPtr, u32) -> i32;
 
 pub trait RuntimeAbi<S: Clone + Send + Sized + 'static> {
-    fn log(env: &dyn WasmState<S>, ptr: u32, len: u32);
-    fn success(env: &dyn WasmState<S>, ptr: u32, len: u32);
+    fn log(env: &dyn WasmState<Vec<u8>, S>, ptr: u32, len: u32);
+    fn success(env: &dyn WasmState<Vec<u8>, S>, ptr: u32, len: u32);
 }
 
 /*

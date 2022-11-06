@@ -1,17 +1,21 @@
-mod abi;
-
 use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use assemblylift_core::abi::RuntimeAbi;
-use wasmer::{imports, Array, ChainableNamedResolver, Cranelift, Function, LazyInit, Memory, Module, NativeFunc, Store, Universal, WasmPtr, WasmerEnv, WasmCell};
+use itertools::Itertools;
+use wasmer::{
+    Array, ChainableNamedResolver, Cranelift, Function, imports, LazyInit, Memory, Module,
+    NativeFunc, Store, Universal, WasmCell, WasmerEnv, WasmPtr,
+};
 use wasmer_wasi::WasiState;
 
+use assemblylift_core::abi::RuntimeAbi;
 use assemblylift_core::buffers::FunctionInputBuffer;
 use assemblylift_core::threader::Threader;
-use assemblylift_core::wasm::{Resolver, WasmModule, WasmState};
+use assemblylift_core::wasm::{Resolver, WasmMemory, WasmModule, WasmState};
 use assemblylift_core_iomod::registry::RegistryTx;
+
+mod abi;
 
 pub struct Wasmer<R, S>
 where
@@ -163,21 +167,37 @@ where
     }
 }
 
-impl<S> WasmState<S> for State<S>
+impl<S> WasmState<Vec<u8>, S> for State<S>
 where
     S: Clone + Send + Sized + 'static,
 {
     fn threader(&self) -> MutexGuard<Threader<S>> {
         self.threader.lock().unwrap()
     }
+}
 
-    fn memory_read<B: AsRef<[u8]>>(&self, offset: usize, length: usize) -> anyhow::Result<B> {
-        todo!()
+impl<S> WasmMemory<Vec<u8>> for State<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    fn memory_read(&self, offset: usize, length: usize) -> anyhow::Result<Vec<u8>> {
+        let wasm_memory = self.memory_ref().unwrap();
+        let input_buffer = self
+            .get_function_input_buffer
+            .get_ref()
+            .unwrap()
+            .call()
+            .unwrap();
+        let reader = input_buffer
+            .deref(&wasm_memory, offset as u32, length as u32)
+            .unwrap();
+        let bytes: Vec<u8> = reader.iter().map(|cell| cell.get()).collect_vec();
+        Ok(bytes)
     }
 
-    fn memory_write<B: AsRef<[u8]>>(&self, offset: usize, bytes: B) -> anyhow::Result<usize> {
+    fn memory_write(&self, offset: usize, bytes: Vec<u8>) -> anyhow::Result<usize> {
         let wasm_memory = self.memory_ref().unwrap();
-        let input_buffer = env
+        let input_buffer = self
             .get_function_input_buffer
             .get_ref()
             .unwrap()
@@ -189,8 +209,7 @@ where
 
         let mut bytes_out = 0usize;
         for (i, b) in bytes.iter().enumerate() {
-            let idx = i + dst.0;
-            memory_writer[idx].set(*b);
+            memory_writer[i].set(*b);
             bytes_out += 1;
         }
         Ok(bytes_out)
