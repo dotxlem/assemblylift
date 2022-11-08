@@ -4,8 +4,10 @@ use std::io;
 use std::io::ErrorKind;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use assemblylift_core::buffers::{LinearBuffer, PagedWasmBuffer};
 use wasmer::MemoryView;
+
+use assemblylift_core::buffers::{LinearBuffer, PagedWasmBuffer};
+use assemblylift_core::wasm::WasmState;
 
 use crate::State;
 
@@ -28,41 +30,38 @@ where
     -1i32 // error
 }
 
-pub fn asml_abi_io_poll<S>(env: &State<S>, id: u32) -> i32
+pub fn asml_abi_io_poll<S>(state: &State<S>, id: u32) -> i32
 where
     S: Clone + Send + Sized + 'static,
 {
-    env.threader.clone().lock().unwrap().poll(id) as i32
+    state.threader().poll(id) as i32
 }
 
-pub fn asml_abi_io_len<S>(env: &State<S>, id: u32) -> u32
+pub fn asml_abi_io_len<S>(state: &State<S>, id: u32) -> u32
 where
     S: Clone + Send + Sized + 'static,
 {
-    env.threader
-        .clone()
-        .lock()
-        .unwrap()
+    state.threader()
         .get_io_memory_document(id)
         .unwrap()
         .length as u32
 }
 
-pub fn asml_abi_io_load<S>(env: &State<S>, id: u32) -> i32
+pub fn asml_abi_io_load<S>(state: &State<S>, id: u32) -> i32
 where
     S: Clone + Send + Sized + 'static,
 {
-    match env.threader.lock().unwrap().document_load(env, id) {
+    match state.threader().document_load(state, id) {
         Ok(_) => 0,
         Err(_) => -1,
     }
 }
 
-pub fn asml_abi_io_next<S>(env: &State<S>) -> i32
+pub fn asml_abi_io_next<S>(state: &State<S>) -> i32
 where
     S: Clone + Send + Sized + 'static,
 {
-    match env.threader.lock().unwrap().document_next(env) {
+    match state.threader().document_next(state) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -77,29 +76,29 @@ where
     unix_time.as_secs() * 1000u64
 }
 
-pub fn asml_abi_input_start<S>(env: &State<S>) -> i32
+pub fn asml_abi_input_start<S>(state: &State<S>) -> i32
 where
     S: Clone + Send + Sized + 'static,
 {
-    env.host_input_buffer
+    state.host_input_buffer
         .clone()
         .lock()
         .unwrap()
-        .first(env, None)
+        .first(state, None)
 }
 
-pub fn asml_abi_input_next<S>(env: &State<S>) -> i32
+pub fn asml_abi_input_next<S>(state: &State<S>) -> i32
 where
     S: Clone + Send + Sized + 'static,
 {
-    env.host_input_buffer.clone().lock().unwrap().next(env)
+    state.host_input_buffer.clone().lock().unwrap().next(state)
 }
 
-pub fn asml_abi_input_length_get<S>(env: &State<S>) -> u64
+pub fn asml_abi_input_length_get<S>(state: &State<S>) -> u64
 where
     S: Clone + Send + Sized + 'static,
 {
-    env.host_input_buffer.clone().lock().unwrap().len() as u64
+    state.host_input_buffer.clone().lock().unwrap().len() as u64
 }
 
 // --- //
@@ -111,28 +110,22 @@ where
     S: Clone + Send + Sized + 'static,
 {
     let ioid = state
-        .threader
-        .clone()
-        .lock()
-        .unwrap()
+        .threader()
         .next_ioid()
         .expect("unable to get a new IO ID");
 
     state
-        .threader
-        .clone()
-        .lock()
-        .unwrap()
+        .threader()
         .invoke(method_path, method_input, ioid);
 
     ioid as i32
 }
 
-fn env_ptr_to_string<S>(env: &State<S>, ptr: u32, len: u32) -> Result<String, io::Error>
+fn env_ptr_to_string<S>(state: &State<S>, ptr: u32, len: u32) -> Result<String, io::Error>
 where
     S: Clone + Send + Sized + 'static,
 {
-    let mem = env.memory_ref().unwrap();
+    let mem = state.memory_ref().unwrap();
     let view: MemoryView<u8> = mem.view();
 
     let mut str_vec: Vec<u8> = Vec::new();

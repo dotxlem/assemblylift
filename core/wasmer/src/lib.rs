@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use itertools::Itertools;
 use wasmer::{
-    Array, ChainableNamedResolver, Cranelift, Function, imports, LazyInit, Memory, Module,
-    NativeFunc, Store, Universal, WasmCell, WasmerEnv, WasmPtr,
+    imports, Array, ChainableNamedResolver, Cranelift, Function, LazyInit, Memory, Module,
+    NativeFunc, Store, Universal, WasmCell, WasmPtr, WasmerEnv,
 };
 use wasmer_wasi::WasiState;
 
@@ -108,8 +108,8 @@ where
             .expect("could not get WASI import object");
         let asml_imports = imports! {
             "env" => {
-                "__asml_abi_runtime_log" => Function::new_native_with_env(&self.store, wasm_state.clone(), R::log),
-                "__asml_abi_runtime_success" => Function::new_native_with_env(&self.store, wasm_state.clone(), R::success),
+                "__asml_abi_runtime_log" => Function::new_native_with_env(&self.store, wasm_state.clone(), log::<R, S>),
+                "__asml_abi_runtime_success" => Function::new_native_with_env(&self.store, wasm_state.clone(), success::<R, S>),
 
                 "__asml_abi_invoke" => Function::new_native_with_env(&self.store, wasm_state.clone(), crate::abi::asml_abi_io_invoke), // TODO deprecated, IOmod guests need to update
                 "__asml_abi_io_invoke" => Function::new_native_with_env(&self.store, wasm_state.clone(), crate::abi::asml_abi_io_invoke),
@@ -214,4 +214,20 @@ where
         }
         Ok(bytes_out)
     }
+}
+
+fn log<R, S>(state: &State<S>, ptr: u32, len: u32)
+where
+    R: RuntimeAbi<S> + 'static,
+    S: Clone + Send + Sized + 'static,
+{
+    R::log(state, ptr, len)
+}
+
+fn success<R, S>(state: &State<S>, ptr: u32, len: u32)
+where
+    R: RuntimeAbi<S> + 'static,
+    S: Clone + Send + Sized + 'static,
+{
+    R::success(state, ptr, len)
 }
