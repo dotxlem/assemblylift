@@ -3,19 +3,18 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use itertools::Itertools;
-use wasmer::{
-    imports, Array, ChainableNamedResolver, Cranelift, Function, LazyInit, Memory, Module,
-    NativeFunc, Store, Universal, WasmCell, WasmPtr, WasmerEnv,
-};
+use wasmer::{Array, ChainableNamedResolver, Cranelift, Function, ImportObject, imports, LazyInit, Memory, Module, NamedResolverChain, NativeFunc, Store, Universal, WasmCell, WasmerEnv, WasmPtr};
 use wasmer_wasi::WasiState;
 
 use assemblylift_core::abi::RuntimeAbi;
 use assemblylift_core::buffers::FunctionInputBuffer;
 use assemblylift_core::threader::Threader;
-use assemblylift_core::wasm::{Resolver, WasmMemory, WasmModule, WasmState};
+use assemblylift_core::wasm::{WasmMemory, WasmModule, WasmState};
 use assemblylift_core_iomod::registry::RegistryTx;
 
 mod abi;
+
+pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
 
 pub struct Wasmer<R, S>
 where
@@ -173,6 +172,14 @@ where
 {
     fn threader(&self) -> MutexGuard<Threader<S>> {
         self.threader.lock().unwrap()
+    }
+
+    fn function_input_buffer(&self) -> MutexGuard<dyn WasmMemory<Vec<u8>>> {
+        todo!()
+    }
+
+    fn io_buffer(&self) -> MutexGuard<dyn WasmMemory<Vec<u8>>> {
+        todo!()
     }
 }
 

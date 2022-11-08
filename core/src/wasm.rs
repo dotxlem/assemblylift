@@ -15,7 +15,6 @@ use crate::abi::*;
 use crate::threader::Threader;
 
 // pub type ModuleTreble<B, S> = (Module, Resolver, ThreaderEnv<B, S>);
-pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
 
 pub trait WasmModule<S> {
     fn deserialize_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self>
@@ -38,6 +37,8 @@ where
     S: Clone + Send + Sized + 'static,
 {
     fn threader(&self) -> MutexGuard<Threader<S>>;
+    fn function_input_buffer(&self) -> MutexGuard<dyn WasmMemory<B>>;
+    fn io_buffer(&self) -> MutexGuard<dyn WasmMemory<B>>;
 }
 
 pub trait WasmMemory<B>
