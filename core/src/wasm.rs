@@ -1,17 +1,9 @@
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::{Arc, MutexGuard};
-
-use wasmer::{
-    imports, ChainableNamedResolver, CpuFeature, Cranelift, Function, ImportObject, Instance,
-    InstantiationError, Module, NamedResolverChain, Store, Target, Triple, Universal,
-};
-use wasmer_wasi::WasiState;
+use std::path::Path;
+use std::rc::Rc;
+use std::sync::MutexGuard;
 
 use assemblylift_core_iomod::registry::RegistryTx;
 
-use crate::abi::*;
 use crate::threader::Threader;
 
 // pub type ModuleTreble<B, S> = (Module, Resolver, ThreaderEnv<B, S>);
@@ -34,14 +26,14 @@ pub trait WasmModule<S> {
     fn instantiate(&self) -> anyhow::Result<()>;
 }
 
-pub trait WasmState<B, S>: WasmMemory<B>
+pub trait WasmState<B, S>
 where
     B: AsRef<[u8]>,
     S: Clone + Send + Sized + 'static,
 {
     fn threader(&self) -> MutexGuard<Threader<S>>;
-    fn function_input_buffer(&self) -> MutexGuard<dyn WasmMemory<B>>;
-    fn io_buffer(&self) -> MutexGuard<dyn WasmMemory<B>>;
+    fn function_input_buffer(&self) -> Rc<dyn WasmMemory<B>>;
+    fn io_buffer(&self) -> Rc<dyn WasmMemory<B>>;
 }
 
 pub trait WasmMemory<B>

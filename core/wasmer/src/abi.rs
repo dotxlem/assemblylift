@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use wasmer::MemoryView;
 
 use assemblylift_core::buffers::{LinearBuffer, PagedWasmBuffer};
+use assemblylift_core::invoke_io;
 use assemblylift_core::wasm::WasmState;
 
 use crate::State;
@@ -102,24 +103,6 @@ where
 }
 
 // --- //
-
-#[inline(always)]
-/// Invoke an IOmod call at coordinates `method_path` with input `method_input`
-fn invoke_io<S>(state: &State<S>, method_path: &str, method_input: Vec<u8>) -> i32
-where
-    S: Clone + Send + Sized + 'static,
-{
-    let ioid = state
-        .threader()
-        .next_ioid()
-        .expect("unable to get a new IO ID");
-
-    state
-        .threader()
-        .invoke(method_path, method_input, ioid);
-
-    ioid as i32
-}
 
 fn env_ptr_to_string<S>(state: &State<S>, ptr: u32, len: u32) -> Result<String, io::Error>
 where

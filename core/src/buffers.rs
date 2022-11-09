@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 
 use assemblylift_core_io_common::constants::{FUNCTION_INPUT_BUFFER_SIZE, IO_BUFFER_SIZE_BYTES};
-use wasmer::WasmCell;
 
 use crate::wasm::WasmState;
 
@@ -130,23 +129,9 @@ where
         src: (usize, usize),
         dst: (usize, usize),
     ) -> Result<(), ()> {
-        // let wasm_memory = state.memory_ref().unwrap();
-        // let input_buffer = state
-        //     .get_function_input_buffer
-        //     .get_ref()
-        //     .unwrap()
-        //     .call()
-        //     .unwrap();
-        // let memory_writer: Vec<WasmCell<u8>> = input_buffer
-        //     .deref(&wasm_memory, dst.0 as u32, dst.1 as u32)
-        //     .unwrap();
-        //
-        // for (i, b) in self.buffer[src.0..src.1].iter().enumerate() {
-        //     let idx = i + dst.0;
-        //     memory_writer[idx].set(*b);
-        // }
-
-        state.memory_write(dst.0, self.buffer[src.0..src.1].to_owned())
+        state
+            .function_input_buffer()
+            .memory_write(dst.0, self.buffer[src.0..src.1].to_owned())
             .expect("could not write to linear memory");
         Ok(()) // FIXME bubble up result
     }
@@ -245,26 +230,14 @@ where
         dst: (usize, usize),
     ) -> Result<(), ()> {
         use std::cmp::min;
-        // let wasm_memory = state.memory_ref().unwrap();
-        // let io_buffer = state.get_io_buffer.get_ref().unwrap().call().unwrap();
-        // let memory_writer: Vec<WasmCell<u8>> = io_buffer
-        //     .deref(&wasm_memory, dst.0 as u32, dst.1 as u32)
-        //     .unwrap();
-        //
-        // let buffer = self.buffers.get(&src.0).unwrap();
-        // for (i, b) in buffer[src.1..min(src.1 + IO_BUFFER_SIZE_BYTES, buffer.len())]
-        //     .iter()
-        //     .enumerate()
-        // {
-        //     memory_writer[i].set(*b);
-        // }
-
         let buffer = self.buffers.get(&src.0).unwrap();
-        state.memory_write(
-            dst.0,
-            buffer[src.1..min(src.1 + IO_BUFFER_SIZE_BYTES, buffer.len())].to_owned(),
-        )
-        .expect("could not write to linear memory");
+        state
+            .io_buffer()
+            .memory_write(
+                dst.0,
+                buffer[src.1..min(src.1 + IO_BUFFER_SIZE_BYTES, buffer.len())].to_owned(),
+            )
+            .expect("could not write to linear memory");
         Ok(()) // FIXME bubble up result
     }
 }

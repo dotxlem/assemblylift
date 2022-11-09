@@ -1,9 +1,14 @@
 use std::mem::ManuallyDrop;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use itertools::Itertools;
-use wasmer::{Array, ChainableNamedResolver, Cranelift, Function, ImportObject, imports, LazyInit, Memory, Module, NamedResolverChain, NativeFunc, Store, Universal, WasmCell, WasmerEnv, WasmPtr};
+use wasmer::{
+    imports, Array, ChainableNamedResolver, Cranelift, Function, ImportObject, LazyInit, Memory,
+    Module, NamedResolverChain, NativeFunc, Store, Universal, WasmPtr,
+    WasmerEnv,
+};
 use wasmer_wasi::WasiState;
 
 use assemblylift_core::abi::RuntimeAbi;
@@ -174,49 +179,123 @@ where
         self.threader.lock().unwrap()
     }
 
-    fn function_input_buffer(&self) -> MutexGuard<dyn WasmMemory<Vec<u8>>> {
-        todo!()
+    fn function_input_buffer(&self) -> Rc<dyn WasmMemory<Vec<u8>>> {
+        Rc::new(FunctionInputMemory::new(
+            self,
+            Rc::new(self.memory.get_ref().cloned().unwrap()),
+        ))
     }
 
-    fn io_buffer(&self) -> MutexGuard<dyn WasmMemory<Vec<u8>>> {
-        todo!()
+    fn io_buffer(&self) -> Rc<dyn WasmMemory<Vec<u8>>> {
+        Rc::new(IoMemory::new(
+            self,
+            Rc::new(self.memory.get_ref().cloned().unwrap()),
+        ))
     }
 }
 
-impl<S> WasmMemory<Vec<u8>> for State<S>
+struct FunctionInputMemory<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    ptr: WasmPtr<u8, Array>,
+    mem: Rc<Memory>,
+    _phantom: std::marker::PhantomData<S>,
+}
+
+impl<S> FunctionInputMemory<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    pub fn new(state: &State<S>, mem: Rc<Memory>) -> Self {
+        Self {
+            ptr: state
+                .get_function_input_buffer
+                .get_ref()
+                .unwrap()
+                .call()
+                .unwrap(),
+            mem,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<S> WasmMemory<Vec<u8>> for FunctionInputMemory<S>
 where
     S: Clone + Send + Sized + 'static,
 {
     fn memory_read(&self, offset: usize, length: usize) -> anyhow::Result<Vec<u8>> {
-        let wasm_memory = self.memory_ref().unwrap();
-        let input_buffer = self
-            .get_function_input_buffer
-            .get_ref()
-            .unwrap()
-            .call()
-            .unwrap();
-        let reader = input_buffer
-            .deref(&wasm_memory, offset as u32, length as u32)
+        let reader = self
+            .ptr
+            .deref(&*self.mem, offset as u32, length as u32)
             .unwrap();
         let bytes: Vec<u8> = reader.iter().map(|cell| cell.get()).collect_vec();
         Ok(bytes)
     }
 
     fn memory_write(&self, offset: usize, bytes: Vec<u8>) -> anyhow::Result<usize> {
-        let wasm_memory = self.memory_ref().unwrap();
-        let input_buffer = self
-            .get_function_input_buffer
-            .get_ref()
-            .unwrap()
-            .call()
+        let writer = self
+            .ptr
+            .deref(&*self.mem, offset as u32, bytes.len() as u32)
             .unwrap();
-        let memory_writer: Vec<WasmCell<u8>> = input_buffer
-            .deref(&wasm_memory, offset as u32, bytes.len() as u32)
-            .unwrap();
-
         let mut bytes_out = 0usize;
         for (i, b) in bytes.iter().enumerate() {
-            memory_writer[i].set(*b);
+            writer[i].set(*b);
+            bytes_out += 1;
+        }
+        Ok(bytes_out)
+    }
+}
+
+struct IoMemory<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    ptr: WasmPtr<u8, Array>,
+    mem: Rc<Memory>,
+    _phantom: std::marker::PhantomData<S>,
+}
+
+impl<S> IoMemory<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    pub fn new(state: &State<S>, mem: Rc<Memory>) -> Self {
+        Self {
+            ptr: state
+                .get_io_buffer
+                .get_ref()
+                .unwrap()
+                .call()
+                .unwrap(),
+            mem,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<S> WasmMemory<Vec<u8>> for IoMemory<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    fn memory_read(&self, offset: usize, length: usize) -> anyhow::Result<Vec<u8>> {
+        let reader = self
+            .ptr
+            .deref(&*self.mem, offset as u32, length as u32)
+            .unwrap();
+        let bytes: Vec<u8> = reader.iter().map(|cell| cell.get()).collect_vec();
+        Ok(bytes)
+    }
+
+    fn memory_write(&self, offset: usize, bytes: Vec<u8>) -> anyhow::Result<usize> {
+        let writer = self
+            .ptr
+            .deref(&*self.mem, offset as u32, bytes.len() as u32)
+            .unwrap();
+        let mut bytes_out = 0usize;
+        for (i, b) in bytes.iter().enumerate() {
+            writer[i].set(*b);
             bytes_out += 1;
         }
         Ok(bytes_out)

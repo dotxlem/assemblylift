@@ -1,12 +1,3 @@
-use std::cell::Cell;
-use std::error::Error;
-use std::io;
-use std::io::ErrorKind;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use wasmer::{Array, MemoryView, WasmPtr};
-
-use crate::buffers::{LinearBuffer, PagedWasmBuffer};
 use crate::wasm::WasmState;
 
 pub trait RuntimeAbi<S: Clone + Send + Sized + 'static> {
