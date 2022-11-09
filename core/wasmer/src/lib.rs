@@ -1,13 +1,11 @@
+use std::cell::Cell;
 use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use itertools::Itertools;
-use wasmer::{
-    imports, Array, ChainableNamedResolver, Cranelift, Function, ImportObject, Instance, LazyInit,
-    Memory, Module, NamedResolverChain, NativeFunc, Store, Universal, WasmPtr, WasmerEnv,
-};
+use wasmer::{Array, ChainableNamedResolver, Cranelift, Function, ImportObject, imports, Instance, LazyInit, Memory, MemoryView, Module, NamedResolverChain, NativeFunc, Store, Universal, WasmerEnv, WasmPtr};
 use wasmer_wasi::WasiState;
 
 use assemblylift_core::abi::RuntimeAbi;
@@ -20,21 +18,23 @@ mod abi;
 
 pub type Resolver = NamedResolverChain<ImportObject, ImportObject>;
 
-pub struct Wasmer<R, S>
+pub struct Wasmer<B, R, S>
 where
-    R: RuntimeAbi<S> + 'static,
+    B: AsRef<[u8]>,
+    R: RuntimeAbi<Vec<u8>, S> + 'static,
     S: Clone + Send + Sized + 'static,
 {
     module: Module,
     store: Store,
     resolver: Option<Resolver>,
     state: Option<State<S>>,
-    _phantom: std::marker::PhantomData<R>,
+    _phantom0: std::marker::PhantomData<B>,
+    _phantom1: std::marker::PhantomData<R>,
 }
 
-impl<R, S> WasmModule<S> for Wasmer<R, S>
+impl<R, S> WasmModule<Vec<u8>, S> for Wasmer<Vec<u8>, R, S>
 where
-    R: RuntimeAbi<S> + 'static,
+    R: RuntimeAbi<Vec<u8>, S> + 'static,
     S: Clone + Send + Sized + 'static,
 {
     fn deserialize_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
@@ -47,13 +47,14 @@ where
                 store,
                 resolver: None,
                 state: None,
-                _phantom: Default::default(),
+                _phantom0: Default::default(),
+                _phantom1: Default::default(),
             }),
             Err(e) => Err(anyhow::Error::new(e)),
         }
     }
 
-    fn deserialize_from_bytes<B: AsRef<[u8]>>(bytes: B) -> anyhow::Result<Self> {
+    fn deserialize_from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
         let compiler = Cranelift::default();
         let store = Store::new(&Universal::new(compiler).engine());
         let module = unsafe { Module::deserialize(&store, bytes.as_ref()) };
@@ -63,7 +64,8 @@ where
                 store,
                 resolver: None,
                 state: None,
-                _phantom: Default::default(),
+                _phantom0: Default::default(),
+                _phantom1: Default::default(),
             }),
             Err(e) => Err(anyhow::Error::new(e)),
         }
@@ -130,12 +132,17 @@ where
         };
 
         self.resolver = Some(asml_imports.chain_back(wasi_imports));
+        self.state = Some(wasm_state);
         Ok(())
     }
 
     fn instantiate(&self) -> anyhow::Result<Box<dyn WasmInstance>> {
         let instance = Instance::new(&self.module, &self.resolver.as_ref().unwrap()).unwrap();
         Ok(Box::new(WasmerInstance { instance }))
+    }
+
+    fn state(&self) -> &dyn WasmState<Vec<u8>, S> {
+        self.state.as_ref().expect("state is None; have you called build()?")
     }
 }
 
@@ -191,6 +198,30 @@ where
             self,
             Rc::new(self.memory.get_ref().cloned().unwrap()),
         ))
+    }
+}
+
+impl<S> WasmMemory<Vec<u8>> for State<S>
+where
+    S: Clone + Send + Sized + 'static,
+{
+    fn memory_read(&self, offset: usize, length: usize) -> anyhow::Result<Vec<u8>> {
+        let memory = self.memory_ref().unwrap();
+        let view: MemoryView<u8> = memory.view();
+
+        let mut bytes: Vec<u8> = Vec::new();
+        for byte in view[offset as usize..(offset + length) as usize]
+            .iter()
+            .map(Cell::get)
+        {
+            bytes.push(byte);
+        }
+
+        Ok(bytes)
+    }
+
+    fn memory_write(&self, offset: usize, bytes: Vec<u8>) -> anyhow::Result<usize> {
+        todo!()
     }
 }
 
@@ -315,7 +346,7 @@ impl WasmInstance for WasmerInstance {
 
 fn log<R, S>(state: &State<S>, ptr: u32, len: u32)
 where
-    R: RuntimeAbi<S> + 'static,
+    R: RuntimeAbi<Vec<u8>, S> + 'static,
     S: Clone + Send + Sized + 'static,
 {
     R::log(state, ptr, len)
@@ -323,7 +354,7 @@ where
 
 fn success<R, S>(state: &State<S>, ptr: u32, len: u32)
 where
-    R: RuntimeAbi<S> + 'static,
+    R: RuntimeAbi<Vec<u8>, S> + 'static,
     S: Clone + Send + Sized + 'static,
 {
     R::success(state, ptr, len)

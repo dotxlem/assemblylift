@@ -107,6 +107,7 @@ dependencies = [
  "assemblylift-core",
  "assemblylift-core-io-common 0.3.0",
  "assemblylift-core-iomod",
+ "assemblylift-core-wasmer",
  "clap 3.2.23",
  "crossbeam-channel",
  "once_cell",

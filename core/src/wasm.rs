@@ -6,14 +6,15 @@ use assemblylift_core_iomod::registry::RegistryTx;
 
 use crate::threader::Threader;
 
-// pub type ModuleTreble<B, S> = (Module, Resolver, ThreaderEnv<B, S>);
-
-pub trait WasmModule<S> {
+pub trait WasmModule<B, S>
+where
+    B: AsRef<[u8]>,
+{
     fn deserialize_from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self>
     where
         Self: Sized;
 
-    fn deserialize_from_bytes<B: AsRef<[u8]>>(bytes: B) -> anyhow::Result<Self>
+    fn deserialize_from_bytes(bytes: B) -> anyhow::Result<Self>
     where
         Self: Sized;
 
@@ -24,9 +25,11 @@ pub trait WasmModule<S> {
     ) -> anyhow::Result<()>;
     
     fn instantiate(&self) -> anyhow::Result<Box<dyn WasmInstance>>;
+
+    fn state(&self) -> &dyn WasmState<B, S>;
 }
 
-pub trait WasmState<B, S>
+pub trait WasmState<B, S>: WasmMemory<B>
 where
     B: AsRef<[u8]>,
     S: Clone + Send + Sized + 'static,
@@ -49,14 +52,6 @@ pub trait WasmInstance {
 }
 
 /*
-
-pub fn new_instance(
-    module: Arc<Module>,
-    import_object: Resolver,
-) -> Result<Instance, InstantiationError> {
-    Instance::new(&module, &import_object)
-}
-
 pub fn precompile(module_path: PathBuf) -> Result<PathBuf, &'static str> {
     // TODO compiler configuration
     let is_wasmu = module_path

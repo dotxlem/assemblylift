@@ -16,7 +16,9 @@ use zip;
 
 use assemblylift_core::buffers::LinearBuffer;
 use assemblylift_core::wasm;
+use assemblylift_core::wasm::WasmModule;
 use assemblylift_core_iomod::{package::IomodManifest, registry};
+use assemblylift_core_wasmer::Wasmer;
 use runtime::AwsLambdaRuntime;
 
 use crate::abi::LambdaAbi;
@@ -85,8 +87,9 @@ async fn main() {
                                             "unable to create directory {:?}",
                                             path_prefix
                                         ));
-                                        let mut entrypoint_file = File::create(path)
-                                            .expect(&*format!("unable to create file at {:?}", path));
+                                        let mut entrypoint_file = File::create(path).expect(
+                                            &*format!("unable to create file at {:?}", path),
+                                        );
                                         std::io::copy(&mut entrypoint_binary, &mut entrypoint_file)
                                             .expect("unable to copy entrypoint");
                                         let mut perms: fs::Permissions =
@@ -160,13 +163,9 @@ async fn main() {
     let task_set = tokio::task::LocalSet::new();
     task_set
         .run_until(async move {
-            let (module, store) = match wasm::deserialize_module_from_path::<LambdaAbi, ()>(
-                &module_path,
-                &handler_name,
-            ) {
-                Ok(module) => (Arc::new(module.0), Arc::new(module.1)),
-                Err(_) => panic!("PANIC this shouldn't happen"),
-            };
+            let mut wasm: Wasmer<Vec<u8>, LambdaAbi, ()> =
+                Wasmer::deserialize_from_path(format!("{}/{}", &module_path, &handler_name))
+                    .unwrap();
 
             while let Ok(event) = LAMBDA_RUNTIME.get_next_event().await {
                 {
@@ -177,29 +176,20 @@ async fn main() {
                     ref_cell.replace(event.request_id.clone());
                 }
 
-                let (import_object, env) = wasm::build_module::<LambdaAbi, ()>(
-                    tx.clone(),
-                    status_sender.clone(),
-                    module.clone(),
-                    &function_name,
-                    store.clone(),
-                )
-                .expect("could not build WASM module");
+                wasm.build(tx.clone(), status_sender.clone())
+                    .expect("could not build WASM module");
                 // TODO we can save some cycles by creating Instances up-front in a pool & recycling them
-                let instance = match wasm::new_instance(module.clone(), import_object.clone()) {
+                let instance = match wasm.instantiate() {
                     Ok(instance) => Arc::new(instance),
                     Err(why) => panic!("PANIC {}", why.to_string()),
                 };
-                env.host_input_buffer
-                    .clone()
-                    .lock()
-                    .unwrap()
-                    .initialize(event.event_body.into_bytes());
+                wasm.state()
+                    .function_input_buffer()
+                    .memory_write(0usize, event.event_body.into_bytes())
+                    .unwrap();
                 tokio::task::spawn_local(async move {
                     // env.clone().threader.lock().unwrap().__reset_memory();
-
-                    let handler_call = instance.exports.get_function("_start").unwrap();
-                    match handler_call.call(&[]) {
+                    match instance.start() {
                         Ok(result) => println!("SUCCESS: handler returned {:?}", result),
                         Err(error) => println!("ERROR: {}", error.to_string()),
                     }
