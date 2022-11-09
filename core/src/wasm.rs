@@ -23,7 +23,7 @@ pub trait WasmModule<S> {
         status_tx: crossbeam_channel::Sender<S>,
     ) -> anyhow::Result<()>;
     
-    fn instantiate(&self) -> anyhow::Result<()>;
+    fn instantiate(&self) -> anyhow::Result<Box<dyn WasmInstance>>;
 }
 
 pub trait WasmState<B, S>
@@ -42,6 +42,10 @@ where
 {
     fn memory_read(&self, offset: usize, length: usize) -> anyhow::Result<B>;
     fn memory_write(&self, offset: usize, bytes: B) -> anyhow::Result<usize>;
+}
+
+pub trait WasmInstance {
+    fn start(&self) -> anyhow::Result<()>;
 }
 
 /*

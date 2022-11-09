@@ -5,16 +5,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use itertools::Itertools;
 use wasmer::{
-    imports, Array, ChainableNamedResolver, Cranelift, Function, ImportObject, LazyInit, Memory,
-    Module, NamedResolverChain, NativeFunc, Store, Universal, WasmPtr,
-    WasmerEnv,
+    imports, Array, ChainableNamedResolver, Cranelift, Function, ImportObject, Instance, LazyInit,
+    Memory, Module, NamedResolverChain, NativeFunc, Store, Universal, WasmPtr, WasmerEnv,
 };
 use wasmer_wasi::WasiState;
 
 use assemblylift_core::abi::RuntimeAbi;
 use assemblylift_core::buffers::FunctionInputBuffer;
 use assemblylift_core::threader::Threader;
-use assemblylift_core::wasm::{WasmMemory, WasmModule, WasmState};
+use assemblylift_core::wasm::{WasmInstance, WasmMemory, WasmModule, WasmState};
 use assemblylift_core_iomod::registry::RegistryTx;
 
 mod abi;
@@ -134,8 +133,9 @@ where
         Ok(())
     }
 
-    fn instantiate(&self) -> anyhow::Result<()> {
-        todo!()
+    fn instantiate(&self) -> anyhow::Result<Box<dyn WasmInstance>> {
+        let instance = Instance::new(&self.module, &self.resolver.as_ref().unwrap()).unwrap();
+        Ok(Box::new(WasmerInstance { instance }))
     }
 }
 
@@ -263,12 +263,7 @@ where
 {
     pub fn new(state: &State<S>, mem: Rc<Memory>) -> Self {
         Self {
-            ptr: state
-                .get_io_buffer
-                .get_ref()
-                .unwrap()
-                .call()
-                .unwrap(),
+            ptr: state.get_io_buffer.get_ref().unwrap().call().unwrap(),
             mem,
             _phantom: Default::default(),
         }
@@ -299,6 +294,22 @@ where
             bytes_out += 1;
         }
         Ok(bytes_out)
+    }
+}
+
+pub struct WasmerInstance {
+    instance: Instance,
+}
+
+impl WasmInstance for WasmerInstance {
+    fn start(&self) -> anyhow::Result<()> {
+        let start = self
+            .instance
+            .exports
+            .get_function("_start")
+            .expect("could not find WASI entrypoint in module");
+        start.call(&[]).unwrap();
+        Ok(()) // FIXME error handling
     }
 }
 
