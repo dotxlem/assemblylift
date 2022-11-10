@@ -28,7 +28,8 @@ impl AwsLambdaProvider {
     pub fn new() -> Self {
         let runtime_url = &*format!(
             "http://public.assemblylift.akkoro.io/runtime/{}/aws-lambda/bootstrap.zip",
-            clap::crate_version!(),
+            // clap::crate_version!(),
+            "xlem",
         );
         let mut response =
             reqwest::blocking::get(runtime_url).expect("could not download bootstrap.zip");

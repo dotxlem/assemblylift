@@ -41,6 +41,9 @@ wasmer-engine-universal = "2.1.1"
 assemblylift-core = { version = "0.4.0-alpha.3", path = "../core" }
 assemblylift-core-iomod = { version = "0.4.0-alpha.0", path = "../core/iomod" }
 
+# TODO feature config to toggle wasmer & wasmtime
+assemblylift_core_wasmer = { version = "0.1.0", package = "assemblylift-core-wasmer", path = "../core/wasmer" }
+
 registry_common = { version = "0.1", package = "asml-iomod-registry-common" }
 
 [dependencies.reqwest]

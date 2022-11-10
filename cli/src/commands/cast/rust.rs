@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use assemblylift_core::wasm;
+use assemblylift_core::wasm::WasmModule;
+use assemblylift_core_wasmer::Wasmer;
 
 use crate::projectfs::Project;
 use crate::transpiler::toml::service::Function;
@@ -81,5 +83,5 @@ pub fn compile(project: Rc<Project>, service_name: &str, function: &Function) ->
         panic!("{:?}", copy_result.err());
     }
 
-    wasm::precompile(PathBuf::from(copy_to)).unwrap()
+    assemblylift_core_wasmer::compile(&*PathBuf::from(copy_to)).unwrap()
 }

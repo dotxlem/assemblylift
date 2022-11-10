@@ -1,11 +1,13 @@
 use std::cell::Cell;
+use std::io::Write;
 use std::mem::ManuallyDrop;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use itertools::Itertools;
-use wasmer::{Array, ChainableNamedResolver, Cranelift, Function, ImportObject, imports, Instance, LazyInit, Memory, MemoryView, Module, NamedResolverChain, NativeFunc, Store, Universal, WasmerEnv, WasmPtr};
+use wasmer::{Array, ChainableNamedResolver, CpuFeature, Cranelift, Function, ImportObject, imports, Instance, LazyInit, Memory, MemoryView, Module, NamedResolverChain, NativeFunc, Store, Target, Triple, Universal, WasmerEnv, WasmPtr};
 use wasmer_wasi::WasiState;
 
 use assemblylift_core::abi::RuntimeAbi;
@@ -341,6 +343,47 @@ impl WasmInstance for WasmerInstance {
             .expect("could not find WASI entrypoint in module");
         start.call(&[]).unwrap();
         Ok(()) // FIXME error handling
+    }
+}
+
+pub fn compile(path: &Path) -> anyhow::Result<PathBuf> {
+    // TODO compiler configuration
+    let is_wasmu = path
+        .extension()
+        .unwrap_or("wasm".as_ref())
+        .eq("wasmu");
+    match is_wasmu {
+        false => {
+            let file_path = format!("{}u", path.display().to_string());
+            println!("Precompiling WASM to {}...", file_path.clone());
+
+            let compiler = Cranelift::default();
+            let triple = Triple::from_str("x86_64-unknown-unknown").unwrap();
+            let mut cpuid = CpuFeature::set();
+            cpuid.insert(CpuFeature::SSE2); // required for x86
+            let store = Store::new(
+                &/*Native*/Universal::new(compiler)
+                    .target(Target::new(triple, cpuid))
+                    .engine(),
+            );
+
+            let wasm_bytes = match std::fs::read(path.clone()) {
+                Ok(bytes) => bytes,
+                Err(err) => panic!("{}", err.to_string()),
+            };
+            let module = Module::new(&store, wasm_bytes).unwrap();
+            let module_bytes = module.serialize().unwrap();
+            let mut module_file = match std::fs::File::create(file_path.clone()) {
+                Ok(file) => file,
+                Err(err) => panic!("{}", err.to_string()),
+            };
+            println!("📄 > Wrote {}", &file_path);
+            module_file.write_all(&module_bytes).unwrap();
+
+            Ok(PathBuf::from(file_path))
+        }
+
+        true => Ok(PathBuf::from(path)),
     }
 }
 

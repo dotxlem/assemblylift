@@ -125,6 +125,7 @@ dependencies = [
  "asml-iomod-registry-common",
  "assemblylift-core",
  "assemblylift-core-iomod",
+ "assemblylift-core-wasmer",
  "base64 0.13.1",
  "bytes 1.2.1",
  "clap 2.34.0",

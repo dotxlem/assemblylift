@@ -67,7 +67,7 @@ pub fn compile(project: Rc<Project>, service_name: &str, function: &Function) ->
     let mut ruby_wasmu = ruby_bin.clone();
     ruby_wasmu.set_extension("wasmu");
     if !Path::new(&ruby_wasmu).exists() {
-        wasm::precompile(PathBuf::from(ruby_wasm)).unwrap();
+        assemblylift_core_wasmer::compile(&*PathBuf::from(ruby_wasm)).unwrap();
     }
     let copy_to = format!("{}/ruby.wasmu", function_artifact_path.clone());
     let copy_result = std::fs::copy(ruby_wasmu.clone(), copy_to.clone());
