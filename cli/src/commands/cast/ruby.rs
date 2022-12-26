@@ -1,7 +1,9 @@
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use assemblylift_core::wasm;
 use path_abs::PathInfo;
 
 use crate::archive::unzip;
@@ -10,6 +12,7 @@ use crate::transpiler::toml::service::Function;
 
 pub fn compile(project: Rc<Project>, service_name: &str, function: &Function) -> PathBuf {
     let function_name = function.name.clone();
+    let service_artifact_path = format!("./net/services/{}", service_name);
     let function_artifact_path = format!("./net/services/{}/{}", service_name, function_name);
 
     let rubysrc_path = format!("{}/rubysrc", function_artifact_path);
@@ -41,26 +44,37 @@ pub fn compile(project: Rc<Project>, service_name: &str, function: &Function) ->
     }
     copy_entries(&function_dir, &PathBuf::from(rubysrc_path));
 
-    if !Path::new(&format!("{}/ruby-wasm32-wasi", function_artifact_path)).exists() {
+    if !Path::new(&format!("{}/ruby-wasm32-wasi", service_artifact_path)).exists() {
         let mut zip = Vec::new();
+        println!("Fetching additional Ruby runtime archive...");
         let mut response = reqwest::blocking::get(
             "http://public.assemblylift.akkoro.io/runtime/ruby/ruby-wasm32-wasi.zip",
         )
         .expect("could not fetch ruby runtime zip");
         response.read_to_end(&mut zip).unwrap();
-        unzip(&zip, &function_artifact_path).unwrap();
+        unzip(&zip, &service_artifact_path).unwrap();
     }
 
-    let copy_from = format!(
-        "{}/ruby-wasm32-wasi/usr/local/bin/ruby.wasmu",
-        function_artifact_path
-    );
+    let ruby_bin = PathBuf::from(format!(
+        "{}/ruby-wasm32-wasi/usr/local/bin/ruby",
+        service_artifact_path
+    ));
+    let mut ruby_wasm = ruby_bin.clone();
+    ruby_wasm.set_extension("wasm");
+    if Path::new(&ruby_bin).exists() {
+        std::fs::rename(ruby_bin.clone(), ruby_wasm.clone()).unwrap();
+    }
+    let mut ruby_wasmu = ruby_bin.clone();
+    ruby_wasmu.set_extension("wasmu");
+    if !Path::new(&ruby_wasmu).exists() {
+        wasm::precompile(PathBuf::from(ruby_wasm)).unwrap();
+    }
     let copy_to = format!("{}/ruby.wasmu", function_artifact_path.clone());
-    let copy_result = std::fs::copy(copy_from.clone(), copy_to.clone());
+    let copy_result = std::fs::copy(ruby_wasmu.clone(), copy_to.clone());
     if copy_result.is_err() {
         println!(
             "ERROR COPY from={} to={}",
-            copy_from.clone(),
+            ruby_wasmu.as_path().display(),
             copy_to.clone()
         );
         panic!("{:?}", copy_result.err());

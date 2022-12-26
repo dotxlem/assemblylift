@@ -1,8 +1,11 @@
+use std::io::Write;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use wasmer::{
-    ChainableNamedResolver, Cranelift, Function, ImportObject, imports, Instance,
-    InstantiationError, Module, NamedResolverChain, Store, Universal,
+    imports, ChainableNamedResolver, CpuFeature, Cranelift, Function, ImportObject, Instance,
+    InstantiationError, Module, NamedResolverChain, Store, Target, Triple, Universal,
 };
 use wasmer_wasi::WasiState;
 
@@ -33,9 +36,7 @@ where
     ))
 }
 
-pub fn deserialize_module_from_bytes<R, S>(
-    module_bytes: &[u8],
-) -> anyhow::Result<(Module, Store)>
+pub fn deserialize_module_from_bytes<R, S>(module_bytes: &[u8]) -> anyhow::Result<(Module, Store)>
 where
     R: RuntimeAbi<S> + 'static,
     S: Clone + Send + Sized + 'static,
@@ -43,7 +44,7 @@ where
     let compiler = Cranelift::default();
     let store = Store::new(&Universal::new(compiler).engine());
     Ok((
-        unsafe { wasmer::Module::deserialize(&store, module_bytes) }
+        unsafe { Module::deserialize(&store, module_bytes) }
             .expect(&format!("could not load wasm from bytes")),
         store,
     ))
@@ -63,13 +64,21 @@ where
     let threader_env = ThreaderEnv::new(registry_tx, status_sender);
     let function_env = std::env::var("ASML_FUNCTION_ENV").unwrap_or("default".into());
     let mut wasi_env = match function_env.as_str() {
-        // TODO ruby-docker ruby-lambda
-        "ruby" => WasiState::new(module_name.clone())
+        "ruby-docker" => WasiState::new(module_name.clone())
             .arg("/src/handler.rb")
             .env("RUBY_PLATFORM", "wasm32-wasi")
             .map_dir("/src", "/usr/bin/ruby-wasm32-wasi/src")
             .expect("could not preopen `src` directory")
             .map_dir("/usr", "/usr/bin/ruby-wasm32-wasi/usr")
+            .expect("could not map ruby fs")
+            .finalize()
+            .expect("could not init WASI env"),
+        "ruby-lambda" => WasiState::new(module_name.clone())
+            .arg("/src/handler.rb")
+            .env("RUBY_PLATFORM", "wasm32-wasi")
+            .map_dir("/src", "/tmp/rubysrc")
+            .expect("could not preopen `src` directory")
+            .map_dir("/usr", "/tmp/rubyusr")
             .expect("could not map ruby fs")
             .finalize()
             .expect("could not init WASI env"),
@@ -114,4 +123,45 @@ pub fn new_instance(
     import_object: Resolver,
 ) -> Result<Instance, InstantiationError> {
     Instance::new(&module, &import_object)
+}
+
+pub fn precompile(module_path: PathBuf) -> Result<PathBuf, &'static str> {
+    // TODO compiler configuration
+    let is_wasmu = module_path
+        .extension()
+        .unwrap_or("wasm".as_ref())
+        .eq("wasmu");
+    match is_wasmu {
+        false => {
+            let file_path = format!("{}u", module_path.as_path().display().to_string());
+            println!("Precompiling WASM to {}...", file_path.clone());
+
+            let compiler = Cranelift::default();
+            let triple = Triple::from_str("x86_64-unknown-unknown").unwrap();
+            let mut cpuid = CpuFeature::set();
+            cpuid.insert(CpuFeature::SSE2); // required for x86
+            let store = Store::new(
+                &/*Native*/Universal::new(compiler)
+                .target(Target::new(triple, cpuid))
+                .engine(),
+            );
+
+            let wasm_bytes = match std::fs::read(module_path.clone()) {
+                Ok(bytes) => bytes,
+                Err(err) => panic!("{}", err.to_string()),
+            };
+            let module = Module::new(&store, wasm_bytes).unwrap();
+            let module_bytes = module.serialize().unwrap();
+            let mut module_file = match std::fs::File::create(file_path.clone()) {
+                Ok(file) => file,
+                Err(err) => panic!("{}", err.to_string()),
+            };
+            println!("📄 > Wrote {}", &file_path);
+            module_file.write_all(&module_bytes).unwrap();
+
+            Ok(PathBuf::from(file_path))
+        }
+
+        true => Ok(module_path),
+    }
 }

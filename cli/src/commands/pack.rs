@@ -12,7 +12,10 @@ pub fn command(matches: Option<&ArgMatches>) {
 
     match matches.subcommand() {
         ("iomod", matches) => command_iomod(matches),
-        _ => println!("{}", "missing subcommand. try `asml pack help` for options."),
+        _ => println!(
+            "{}",
+            "missing subcommand. try `asml pack help` for options."
+        ),
     }
 }
 
@@ -26,18 +29,20 @@ fn command_iomod(matches: Option<&ArgMatches>) {
     let mut manifest_path = cwd.clone();
     manifest_path.push("iomod.toml");
 
-    let manifest = IomodManifest::read(&manifest_path)
-        .expect(&format!("could not read iomod manifest from {:?}", manifest_path));
+    let manifest = IomodManifest::read(&manifest_path).expect(&format!(
+        "could not read iomod manifest from {:?}",
+        manifest_path
+    ));
 
     let entrypoint = manifest.process.entrypoint;
     let mut binary_path = cwd.clone();
     binary_path.push(entrypoint);
-    
+
     // verify that the entrypoint exists before we pack it
     std::fs::metadata(binary_path.clone())
         .expect(&format!("could not stat {:?}", binary_path.clone()));
 
     let out_path = matches.value_of("out").unwrap(); // unwrap: this arg is required
 
-    archive::zip_dir(cwd, out_path).expect("zip_dir failed during pack");
+    archive::zip_dirs(vec![cwd], out_path, vec![]).expect("zip_dir failed during pack");
 }

@@ -1,16 +1,24 @@
+use std::collections::HashMap;
 use std::fs;
+use std::fs::File;
 use std::io::Read;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use handlebars::{Handlebars, to_json};
+use itertools::Itertools;
+use once_cell::sync::Lazy;
 use registry_common::models::GetIomodAtResponse;
 use serde::Serialize;
 
 use crate::archive;
-use crate::providers::{Options, Provider, ProviderError, render_string_list};
-use crate::transpiler::{Artifact, Bindable, Castable, CastError, ContentType, context, Template};
-use crate::transpiler::context::Context;
+use crate::providers::{AWS_LAMBDA_PROVIDER_NAME, DNS_PROVIDERS, flatten, LockBox, Options, Provider, ProviderError, ProviderMap, render_string_list};
+use crate::transpiler::{
+    Artifact, Bindable, Bootable, Castable, CastError, ContentType, context, Template,
+};
+use crate::transpiler::context::{Context, Function};
 
 pub struct AwsLambdaProvider {
     options: Arc<Options>,
@@ -41,11 +49,21 @@ impl AwsLambdaProvider {
     pub fn cast_iomods(ctx: Rc<Context>, service_name: &str) -> Result<(), CastError> {
         let project_path = ctx.project.path.clone();
         let iomod_path = format!("{}/net/services/{}/iomods", project_path, service_name);
-        fs::remove_dir_all(iomod_path.clone()).expect("could not rm iomod directory");
+        if Path::new(&iomod_path.clone()).exists() {
+            fs::remove_dir_all(iomod_path.clone()).expect("could not rm iomod directory");
+        }
         fs::create_dir_all(iomod_path.clone()).expect("could not create iomod directory");
 
-        let mut dependencies: Vec<String> = Vec::new();
-        for iomod in &ctx.iomods {
+        let mut dependencies: Vec<PathBuf> = Vec::new();
+        // println!("DEBUG service_name={:?}", service_name);
+        // println!("DEBUG iomods={:?}", ctx.iomods);
+        let service_iomods: Vec<&context::Iomod> = ctx
+            .iomods
+            .iter()
+            .filter(|m| m.service_name == service_name.to_string())
+            .collect();
+        // println!("DEBUG iomods={:?}", service_iomods);
+        for iomod in service_iomods {
             // let dependency_coords: Vec<&str> = iomod.coordinates.split('.').collect();
             // let dependency_name = dependency_coords.get(2).unwrap().to_string();
 
@@ -65,8 +83,8 @@ impl AwsLambdaProvider {
             //     dependencies.push(dependency_path);
             // } else {
             let dependency_path = format!(
-                "{}/net/services/{}/iomods/{}@{}.iomod",
-                project_path, service_name, iomod.coordinates, iomod.version,
+                "{}/{}@{}.iomod",
+                iomod_path, iomod.coordinates, iomod.version,
             );
             let client = reqwest::blocking::ClientBuilder::new()
                 .build()
@@ -78,17 +96,46 @@ impl AwsLambdaProvider {
             let res: GetIomodAtResponse = client.get(registry_url).send().unwrap().json().unwrap();
             let bytes = client.get(res.url).send().unwrap().bytes().unwrap();
             fs::write(&dependency_path, &*bytes).expect("could not write iomod package");
-            dependencies.push(dependency_path);
+            dependencies.push(PathBuf::from(dependency_path));
         }
 
-        archive::zip_files(
+        archive::zip_dirs(
             dependencies,
-            format!("./.asml/runtime/{}.zip", &service_name),
-            Some("iomod/"),
-            false,
-        );
+            format!("./.asml/runtime/{}-iomods.zip", &service_name),
+            Vec::new(),
+        )
+        .map_err(|_| CastError("unable to zip IOmods".into()))
+    }
 
-        Ok(())
+    pub fn cast_ruby(ctx: Rc<Context>, service_name: &str) -> Result<(), CastError> {
+        let project_path = ctx.project.path.clone();
+        let ruby_dir = format!(
+            "{}/net/services/{}/ruby-wasm32-wasi",
+            project_path, service_name
+        );
+        archive::zip_dirs(
+            vec![ruby_dir.into()],
+            format!("./.asml/runtime/{}-ruby.zip", &service_name),
+            vec!["ruby.wasmu", "ruby.wasm", "ruby"],
+        )
+        .map_err(|_| CastError("could not zip ruby env directory".into()))
+    }
+
+    pub fn is_function_large(ctx: Rc<Context>, f: &Function) -> bool {
+        let project_path = ctx.project.path.clone();
+        let artifact_path = format!(
+            "{}/net/services/{}/{}/{}.zip",
+            &project_path,
+            f.service_name.clone(),
+            f.name.clone(),
+            f.name.clone()
+        );
+        File::open(artifact_path)
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .size()
+            > (50 * 1000 * 1000)
     }
 }
 
@@ -97,20 +144,17 @@ impl Castable for AwsLambdaProvider {
         let service_subprovider = LambdaService {
             options: self.options.clone(),
         };
+
         let mut service_artifacts = ctx
             .services
             .iter()
+            .filter(|&s| s.provider.name == self.name())
             .map(|s| {
                 service_subprovider
                     .cast(ctx.clone(), Some(&s.name))
                     .unwrap()
             })
-            .reduce(|mut accum, mut v| {
-                let mut out = Vec::new();
-                out.append(&mut accum);
-                out.append(&mut v);
-                out
-            })
+            .reduce(flatten)
             .unwrap();
 
         let base_tmpl = LambdaBaseTemplate {
@@ -135,9 +179,19 @@ impl Bindable for AwsLambdaProvider {
     }
 }
 
+impl Bootable for AwsLambdaProvider {
+    fn boot(&self, _ctx: Rc<Context>) -> Result<(), CastError> {
+        Ok(())
+    }
+
+    fn is_booted(&self, _ctx: Rc<Context>) -> bool {
+        true
+    }
+}
+
 impl Provider for AwsLambdaProvider {
     fn name(&self) -> String {
-        String::from("aws-lambda")
+        String::from(AWS_LAMBDA_PROVIDER_NAME)
     }
 
     fn options(&self) -> Arc<Options> {
@@ -159,21 +213,47 @@ impl Castable for LambdaService {
         let name = selector
             .expect("selector must be a service name")
             .to_string();
+        let project_name = ctx.project.name.clone();
         let layer_name = format!(
             "asml-{}-{}-lambda-runtime",
             ctx.project.name.clone(),
             name.clone(),
         );
+        let service = ctx.service(&name).unwrap();
 
         AwsLambdaProvider::cast_iomods(ctx.clone(), &name).unwrap();
-
+        let mut has_ruby_layer = false;
+        if ctx
+            .functions
+            .iter()
+            .filter(|&f| f.service_name == name.clone())
+            .find(|f| f.language == "ruby")
+            .is_some()
+        {
+            AwsLambdaProvider::cast_ruby(ctx.clone(), &name)?;
+            has_ruby_layer = true;
+        }
+        let has_iomods_layer = ctx
+            .iomods
+            .iter()
+            .filter(|&m| m.service_name == name.clone())
+            .collect_vec()
+            .len()
+            > 0;
+        let has_large_payloads = ctx
+            .functions
+            .iter()
+            .filter(|&f| f.service_name == name.clone())
+            .find(|f| AwsLambdaProvider::is_function_large(ctx.clone(), f))
+            .is_some();
         let use_apigw = ctx.functions.iter().find(|f| f.http.is_some()).is_some();
-        let has_service_layer = ctx.iomods.len() > 0;
+        let has_domain_name = service.domain_name.is_some();
 
         let authorizers: Vec<ServiceAuthData> = ctx
             .authorizers
             .iter()
-            .filter(|a| a.r#type.to_lowercase() != "aws_iam")
+            .filter(|&a| a.service_name == name.clone())
+            .filter(|&a| a.r#type.to_lowercase() != "aws_iam")
             .map(|a| ServiceAuthData {
                 id: a.id.clone(),
                 r#type: a.r#type.clone(),
@@ -194,14 +274,25 @@ impl Castable for LambdaService {
         let hcl_content = ServiceTemplate {
             project_name: ctx.project.name.clone(),
             service_name: name.clone(),
+            domain_name: String::from(
+                service
+                    .domain_name
+                    .as_ref()
+                    .unwrap_or(&format!("{}.com", &project_name)),
+            ),
             layer_name,
             use_apigw,
-            has_service_layer,
+            has_iomods_layer,
+            has_ruby_layer,
+            has_large_payloads,
+            has_domain_name,
             authorizers,
             options: self.options.clone(),
-        }.render();
+        }
+        .render();
 
         let function_subprovider = LambdaFunction {
+            service_name: name.clone(),
             options: self.options.clone(),
         };
         let function_artifacts = ctx
@@ -213,12 +304,7 @@ impl Castable for LambdaService {
                     .cast(ctx.clone(), Some(&f.name))
                     .unwrap()
             })
-            .reduce(|mut accum, mut v| {
-                let mut out = Vec::new();
-                out.append(&mut accum);
-                out.append(&mut v);
-                out
-            })
+            .reduce(flatten)
             .unwrap();
         let function_hcl = function_artifacts
             .iter()
@@ -237,6 +323,7 @@ impl Castable for LambdaService {
 }
 
 struct LambdaFunction {
+    service_name: String,
     options: Arc<Options>,
 }
 
@@ -245,7 +332,12 @@ impl Castable for LambdaFunction {
         let name = selector
             .expect("selector must be a function name")
             .to_string();
-        match ctx.functions.iter().find(|&f| f.name == name) {
+        match ctx
+            .functions
+            .iter()
+            .filter(|&f| f.service_name == self.service_name)
+            .find(|&f| f.name == name)
+        {
             Some(function) => {
                 let service = function.service_name.clone();
 
@@ -293,17 +385,30 @@ impl Castable for LambdaFunction {
                     project_name: ctx.project.name.clone(),
                     service_name: service.clone(),
                     function_name: function.name.clone(),
+                    handler_name: match function.language.as_str() {
+                        "rust" => format!("{}.wasmu", function.name.clone()),
+                        "ruby" => "ruby.wasmu".into(),
+                        _ => "handler".into(),
+                    },
                     runtime_layer: format!(
                         "aws_lambda_layer_version.asml_{}_runtime.arn",
                         service.clone()
                     ),
-                    service_layer: match iomod_names.len() {
+                    iomods_layer: match iomod_names.len() {
                         0 => None,
                         _ => Some(format!(
-                            "aws_lambda_layer_version.asml_{}_service.arn",
+                            "aws_lambda_layer_version.asml_{}_iomods.arn",
                             service.clone()
                         )),
                     },
+                    ruby_layer: match &*function.language {
+                        "ruby" => Some(format!(
+                            "aws_lambda_layer_version.asml_{}_ruby.arn",
+                            service.clone()
+                        )),
+                        _ => None,
+                    },
+                    large_payload: AwsLambdaProvider::is_function_large(ctx.clone(), function),
                     size: function.size,
                     timeout: function.timeout,
                     http: match &function.http {
@@ -349,7 +454,7 @@ impl Template for LambdaBaseTemplate {
         r#"# AssemblyLift AWS Lambda Provider Begin
 
 provider aws {
-    alias  = "{{project_name}}"
+    alias  = "{{project_name}}-aws-lambda"
     region = "{{options.aws_region}}"
 }
 
@@ -362,8 +467,12 @@ struct ServiceTemplate {
     project_name: String,
     service_name: String,
     layer_name: String,
-    has_service_layer: bool,
+    domain_name: String,
+    has_iomods_layer: bool,
+    has_ruby_layer: bool,
+    has_large_payloads: bool,
     use_apigw: bool,
+    has_domain_name: bool,
     authorizers: Vec<ServiceAuthData>,
     options: Arc<Options>,
 }
@@ -380,7 +489,7 @@ impl Template for ServiceTemplate {
         r#"# Begin service `{{service_name}}`
 
 resource aws_lambda_layer_version asml_{{service_name}}_runtime {
-    provider = aws.{{project_name}}
+    provider = aws.{{project_name}}-aws-lambda
 
     filename   = "${local.project_path}/.asml/runtime/bootstrap.zip"
     layer_name = "{{layer_name}}"
@@ -388,30 +497,40 @@ resource aws_lambda_layer_version asml_{{service_name}}_runtime {
     source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/bootstrap.zip")
 }
 
-{{#if has_service_layer}}resource aws_lambda_layer_version asml_{{service_name}}_service {
-    provider = aws.{{project_name}}
+{{#if has_iomods_layer}}resource aws_lambda_layer_version asml_{{service_name}}_iomods {
+    provider = aws.{{project_name}}-aws-lambda
 
-    filename   = "${local.project_path}/.asml/runtime/{{service_name}}.zip"
-    layer_name = "asml-${local.project_name}-{{service_name}}-service"
+    filename   = "${local.project_path}/.asml/runtime/{{service_name}}-iomods.zip"
+    layer_name = "asml-${local.project_name}-{{service_name}}-iomods"
 
-    source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/{{service_name}}.zip")
+    source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/{{service_name}}-iomods.zip")
+}{{/if}}
+
+{{#if has_ruby_layer}}resource aws_lambda_layer_version asml_{{service_name}}_ruby {
+    provider = aws.{{project_name}}-aws-lambda
+
+    filename   = "${local.project_path}/.asml/runtime/{{service_name}}-ruby.zip"
+    layer_name = "asml-${local.project_name}-{{service_name}}-ruby"
+
+    source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/{{service_name}}-ruby.zip")
 }{{/if}}
 
 {{#if use_apigw}}resource aws_apigatewayv2_api {{service_name}}_http_api {
-    provider      = aws.{{project_name}}
+    provider      = aws.{{project_name}}-aws-lambda
     name          = "asml-${local.project_name}-{{service_name}}"
     protocol_type = "HTTP"
 }
 
 resource aws_apigatewayv2_stage {{service_name}}_default_stage {
-    provider    = aws.{{project_name}}
+    provider    = aws.{{project_name}}-aws-lambda
     api_id      = aws_apigatewayv2_api.{{service_name}}_http_api.id
     name        = "$default"
     auto_deploy = true
-}{{/if}}
+}
+{{/if}}
 
 {{#each authorizers}}resource aws_apigatewayv2_authorizer {{../service_name}}_{{this.id}} {
-    provider    = aws.{{../project_name}}
+    provider    = aws.{{../project_name}}-aws-lambda
 
     api_id           = aws_apigatewayv2_api.{{../service_name}}_http_api.id
     authorizer_type  = "{{this.type}}"
@@ -424,6 +543,15 @@ resource aws_apigatewayv2_stage {{service_name}}_default_stage {
     }{{/if}}
 }{{/each}}
 
+{{#if has_large_payloads}}resource aws_s3_bucket asml_{{service_name}}_functions {
+    provider = aws.{{project_name}}-aws-lambda
+    bucket   = "asml-${local.project_name}-{{service_name}}-functions"
+}
+resource aws_s3_bucket_acl functions {
+    provider = aws.{{project_name}}-aws-lambda
+    bucket   = aws_s3_bucket.asml_{{service_name}}_functions.id
+    acl      = "private"
+}{{/if}}
 "#
     }
 }
@@ -432,8 +560,11 @@ resource aws_apigatewayv2_stage {{service_name}}_default_stage {
 pub struct FunctionTemplate {
     pub service_name: String,
     pub function_name: String,
+    pub handler_name: String,
     pub runtime_layer: String,
-    pub service_layer: Option<String>,
+    pub iomods_layer: Option<String>,
+    pub ruby_layer: Option<String>,
+    pub large_payload: bool,
     pub http: Option<HttpData>,
     pub auth: Option<FunctionAuthData>,
     pub size: u16,
@@ -452,24 +583,43 @@ impl Template for FunctionTemplate {
     fn tmpl() -> &'static str {
         r#"# Begin function `{{function_name}}` (in `{{service_name}}`)
 
+{{#if large_payload}}resource aws_s3_object asml_{{service_name}}_{{function_name}} {
+    key    = "{{function_name}}.zip"
+    bucket = aws_s3_bucket.asml_{{service_name}}_functions.id
+    source = "${local.project_path}/net/services/{{service_name}}/{{function_name}}/{{function_name}}.zip"
+    etag   = filemd5("${local.project_path}/net/services/{{service_name}}/{{function_name}}/{{function_name}}.zip")
+}{{/if}}
+
 resource aws_lambda_function asml_{{service_name}}_{{function_name}} {
-    provider = aws.{{project_name}}
+    provider = aws.{{project_name}}-aws-lambda
 
     function_name = "asml-{{project_name}}-{{service_name}}-{{function_name}}"
     role          = aws_iam_role.{{service_name}}_{{function_name}}_lambda_iam_role.arn
     runtime       = "provided"
-    handler       = "{{function_name}}.wasi._start"
-    filename      = "${local.project_path}/net/services/{{service_name}}/{{function_name}}/{{function_name}}.zip"
+    handler       = "{{handler_name}}"
     timeout       = {{timeout}}
     memory_size   = {{size}}
 
-    layers = [{{runtime_layer}}{{#if service_layer}}, {{service_layer}}{{/if}}]
+    {{#if large_payload}}
+    s3_key    = "{{../function_name}}.zip"
+    s3_bucket = aws_s3_bucket.asml_{{../service_name}}_functions.id
+    {{else}}
+    filename  = "${local.project_path}/net/services/{{../service_name}}/{{../function_name}}/{{../function_name}}.zip"
+    {{/if}}
+
+    {{#if ruby_layer}}environment {
+      variables = {
+        ASML_FUNCTION_ENV = "ruby-lambda"
+      }
+    }{{/if}}
+
+    layers = [{{runtime_layer}}{{#if iomods_layer}}, {{iomods_layer}}{{/if}}{{#if ruby_layer}}, {{ruby_layer}}{{/if}}]
 
     source_code_hash = filebase64sha256("${local.project_path}/net/services/{{service_name}}/{{function_name}}/{{function_name}}.zip")
 }
 
 resource aws_iam_role {{service_name}}_{{function_name}}_lambda_iam_role {
-    provider = aws.{{project_name}}
+    provider = aws.{{project_name}}-aws-lambda
     name     = "asml-{{project_name}}-{{service_name}}-{{function_name}}"
 
     assume_role_policy = <<EOF
@@ -510,7 +660,7 @@ EOF
 }
 {{#if http}}
 resource aws_apigatewayv2_route asml_{{service_name}}_{{function_name}} {
-    provider = aws.{{project_name}}
+    provider = aws.{{project_name}}-aws-lambda
 
     api_id    = aws_apigatewayv2_api.{{service_name}}_http_api.id
     route_key = "{{http.verb}} {{http.path}}"
@@ -525,10 +675,11 @@ resource aws_apigatewayv2_route asml_{{service_name}}_{{function_name}} {
 }
 
 resource aws_apigatewayv2_integration asml_{{service_name}}_{{function_name}} {
-    provider = aws.{{project_name}}
+    provider = aws.{{project_name}}-aws-lambda
 
-    api_id           = aws_apigatewayv2_api.{{service_name}}_http_api.id
-    integration_type = "AWS_PROXY"
+    api_id                 = aws_apigatewayv2_api.{{service_name}}_http_api.id
+    integration_type       = "AWS_PROXY"
+    payload_format_version = "2.0"
 
     connection_type    = "INTERNET"
     integration_method = "POST"
@@ -536,7 +687,7 @@ resource aws_apigatewayv2_integration asml_{{service_name}}_{{function_name}} {
 }
 
 resource aws_lambda_permission asml_{{service_name}}_{{function_name}} {
-    provider = aws.{{project_name}}
+    provider = aws.{{project_name}}-aws-lambda
 
     action        = "lambda:InvokeFunction"
     function_name = "asml-{{project_name}}-{{service_name}}-{{function_name}}"

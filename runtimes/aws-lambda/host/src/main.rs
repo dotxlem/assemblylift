@@ -4,6 +4,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, Mutex};
 
@@ -34,7 +35,7 @@ async fn main() {
         crate_version!()
     );
 
-    let registry_channel = mpsc::channel(100);
+    let registry_channel = mpsc::channel(32);
     let tx = registry_channel.0.clone();
     let rx = registry_channel.1;
     registry::spawn_registry(rx).unwrap();
@@ -106,9 +107,49 @@ async fn main() {
     }
 
     let module_path = env::var("LAMBDA_TASK_ROOT").unwrap();
-    let handler_coordinates = env::var("_HANDLER").unwrap();
-    let coords = handler_coordinates.split(".").collect::<Vec<&str>>();
-    let module_name = format!("{}.wasm.bin", coords[0]);
+    let handler_name = env::var("_HANDLER").unwrap();
+    let parts = handler_name.split(".").collect::<Vec<&str>>();
+    let function_name = String::from(parts[0]);
+
+    if let Ok("ruby-lambda") = env::var("ASML_FUNCTION_ENV").as_deref() {
+        let rubysrc_path = "/tmp/rubysrc";
+        if !Path::new(&rubysrc_path).exists() {
+            fs::create_dir_all(rubysrc_path)
+                .expect(&*format!("unable to create directory {:?}", rubysrc_path));
+        }
+        let rubyusr_path = "/tmp/rubyusr";
+        if !Path::new(&rubyusr_path).exists() {
+            fs::create_dir_all(rubyusr_path)
+                .expect(&*format!("unable to create directory {:?}", rubyusr_path));
+        }
+
+        fn copy_entries(dir: &PathBuf, to: &PathBuf) {
+            for entry in fs::read_dir(dir).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_file() {
+                    let copy_to = format!(
+                        "{}/{}",
+                        to.to_str().unwrap(),
+                        entry.file_name().to_str().unwrap()
+                    );
+                    fs::copy(entry.path(), copy_to).unwrap();
+                } else if entry.file_type().unwrap().is_dir() {
+                    let mut copy_to = PathBuf::from(to);
+                    copy_to.push(entry.path().iter().last().unwrap());
+                    fs::create_dir_all(&copy_to).unwrap();
+                    copy_entries(&entry.path(), &copy_to);
+                }
+            }
+        }
+        copy_entries(
+            &PathBuf::from(format!("{}/rubysrc", &module_path)),
+            &PathBuf::from(rubysrc_path),
+        );
+        copy_entries(
+            &PathBuf::from("/opt/ruby-wasm32-wasi/usr"),
+            &PathBuf::from(rubyusr_path),
+        );
+    }
 
     let (status_sender, _status_receiver) = bounded::<()>(1);
 
@@ -117,7 +158,7 @@ async fn main() {
         .run_until(async move {
             let (module, store) = match wasm::deserialize_module_from_path::<LambdaAbi, ()>(
                 &module_path,
-                &module_name,
+                &handler_name,
             ) {
                 Ok(module) => (Arc::new(module.0), Arc::new(module.1)),
                 Err(_) => panic!("PANIC this shouldn't happen"),
@@ -136,9 +177,10 @@ async fn main() {
                     tx.clone(),
                     status_sender.clone(),
                     module.clone(),
-                    coords[0],
+                    &function_name,
                     store.clone(),
-                ).expect("could not build WASM module");
+                )
+                .expect("could not build WASM module");
                 // TODO we can save some cycles by creating Instances up-front in a pool & recycling them
                 let instance = match wasm::new_instance(module.clone(), import_object.clone()) {
                     Ok(instance) => Arc::new(instance),
