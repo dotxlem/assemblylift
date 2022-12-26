@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use assemblylift_core::wasm;
@@ -55,6 +55,21 @@ pub fn compile(project: Rc<Project>, service_name: &str, function: &Function) ->
         mode,
         function_name,
     );
+    let copy_from = match std::fs::metadata(&copy_from) {
+        Ok(_) => copy_from,
+        Err(_) => format!(
+            "{}/target/{}/{}/{}.wasm",
+            project
+                .clone()
+                .dir()
+                .into_os_string()
+                .into_string()
+                .unwrap(),
+            target,
+            mode,
+            function_name,
+        ),
+    };
     let copy_to = format!("{}/{}.wasm", function_artifact_path.clone(), &function_name);
     let copy_result = std::fs::copy(copy_from.clone(), copy_to.clone());
     if copy_result.is_err() {
@@ -66,5 +81,5 @@ pub fn compile(project: Rc<Project>, service_name: &str, function: &Function) ->
         panic!("{:?}", copy_result.err());
     }
 
-    wasm::precompile(PathBuf::from(copy_to)).unwrap()
+    wasm::precompile(Path::new(&copy_to), "x86_64-linux-gnu").unwrap()
 }

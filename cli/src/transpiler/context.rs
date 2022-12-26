@@ -11,9 +11,14 @@ use serde::Serialize;
 use crate::projectfs::Project as ProjectFs;
 use crate::providers::{DNS_PROVIDERS, PROVIDERS};
 use crate::transpiler::{
-    toml, Artifact, Bindable, CastError, Castable, ContentType, StringMap, Template,
+    Artifact, Bindable, Castable, CastError, ContentType, StringMap, Template, toml,
 };
 
+/// `Context` is a state object, containing the configuration of a project as deserialized from the
+/// project and service manifests (TOML). `Context` is `Castable` and is the entrypoint of the `cast`
+/// operation.
+///
+/// See docs/cli-transpiler.md
 pub struct Context {
     pub project: Project,
     pub terraform: Option<Terraform>,
@@ -53,6 +58,7 @@ impl Context {
                 provider: Rc::new(Provider {
                     name: d.provider.name.clone(),
                     options: d.provider.options.clone(),
+                    tf_name: "nil".to_string(),
                 }),
             })
             .collect();
@@ -74,6 +80,11 @@ impl Context {
                 provider: Rc::new(Provider {
                     name: service_provider.name.clone(),
                     options: service_provider.options.clone(),
+                    tf_name: match &*service_provider.name {
+                        "aws-lambda" => "aws",
+                        "k8s" => "kubernetes",
+                        _ => "nil"
+                    }.to_string(),
                 }),
                 is_root: service_manifest.api.is_root,
                 domain_name: service_manifest.api.domain_name,
@@ -194,6 +205,10 @@ impl Castable for Context {
             None => (false, None, None),
         };
 
+        let mut providers: Vec<Rc<Provider>> =
+            ctx.services.iter().map(|s| s.provider.clone()).collect();
+        providers.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&*b.name));
+
         let tmpl = ContextTemplate {
             project_name: self.project.name.clone(),
             project_path: self.project.path.clone(),
@@ -201,10 +216,11 @@ impl Castable for Context {
             remote_state,
             state_bucket_name,
             lock_table_name,
+            providers: providers.clone(),
         };
         hcl_content.push_str(&*tmpl.render());
 
-        // FIXME dedupe by name
+        // FIXME dedupe by name (there's only one provider possible rn)
         let mut dns_providers = ctx.domains.iter().map(|d| d.provider.clone()).collect_vec();
         for dns in dns_providers {
             let provider = DNS_PROVIDERS
@@ -228,9 +244,6 @@ impl Castable for Context {
         }
 
         let mut out: Vec<Artifact> = Vec::new();
-        let mut providers: Vec<Rc<Provider>> =
-            ctx.services.iter().map(|s| s.provider.clone()).collect();
-        providers.dedup_by(|a, b| a.name.eq_ignore_ascii_case(&*b.name));
         for p in providers {
             // println!("DEBUG casting provider {}", p.name.clone());
             let provider = PROVIDERS
@@ -332,9 +345,11 @@ impl Service {
     }
 }
 
+#[derive(Serialize)]
 pub struct Provider {
     pub name: String,
     pub options: Arc<StringMap<String>>,
+    tf_name: String,
 }
 
 pub struct Function {
@@ -384,6 +399,7 @@ pub struct ContextTemplate {
     pub remote_state: bool,
     pub state_bucket_name: Option<String>,
     pub lock_table_name: Option<String>,
+    pub providers: Vec<Rc<Provider>>,
 }
 
 impl Template for ContextTemplate {
@@ -412,8 +428,17 @@ locals {
     project_name = "{{project_name}}"
     project_path = "{{project_path}}"
 }
+{{#each providers}}
+provider {{tf_name}} {
+    alias  = "{{../project_name}}-{{name}}"
+    region = "{{options.aws_region}}"
+}
+{{/each}}
 {{#if user_inject}}module "usermod" {
   source = "../user_tf"
+  providers = {
+  {{#each providers}}  {{this.tf_name}}.{{../project_name}}-{{this.name}} = {{this.tf_name}}.{{../project_name}}-{{this.name}}{{/each}}
+  }
 }{{/if}}
 {{#if remote_state}}terraform {
   backend "s3" {

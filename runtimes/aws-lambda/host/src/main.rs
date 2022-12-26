@@ -14,8 +14,7 @@ use once_cell::sync::Lazy;
 use tokio::sync::mpsc;
 use zip;
 
-use assemblylift_core::buffers::LinearBuffer;
-use assemblylift_core::wasm;
+use assemblylift_core::wasm::Wasmtime;
 use assemblylift_core_iomod::{package::IomodManifest, registry};
 use runtime::AwsLambdaRuntime;
 
@@ -31,7 +30,7 @@ pub static LAMBDA_REQUEST_ID: Lazy<Mutex<RefCell<String>>> =
 #[tokio::main]
 async fn main() {
     println!(
-        "Starting AssemblyLift AWS Lambda runtime {}",
+        "Starting AssemblyLift AWS Lambda runtime v{}",
         crate_version!()
     );
 
@@ -41,16 +40,17 @@ async fn main() {
     registry::spawn_registry(rx).unwrap();
 
     // load plugins from runtime dir, which should contain merged contents of Lambda layers
-    if let Ok(rd) = fs::read_dir("/opt/iomod") {
+    if let Ok(rd) = fs::read_dir("/opt") {
         for entry in rd {
             let entry = entry.unwrap();
+            println!("DEBUG entry={:?}", entry);
             if entry.file_type().unwrap().is_file() {
-                // this makes the assumption that the
-                // IOmod entrypoint is always an executable binary
-                match entry.path().extension() {
-                    Some(os_str) => match os_str.to_str() {
-                        Some("iomod") => {
-                            let file = fs::File::open(&entry.path()).unwrap();
+                // FIXME this makes the assumption that the
+                //       IOmod entrypoint is always an executable binary
+                if let Some(os_path) = entry.path().extension() {
+                    if let Some(ext) = os_path.to_str() {
+                        if ext == "iomod" {
+                            let file = File::open(&entry.path()).unwrap();
                             let reader = BufReader::new(file);
                             let archive = RefCell::new(zip::ZipArchive::new(reader).unwrap());
                             let mut manifest_str: String = Default::default();
@@ -76,40 +76,41 @@ async fn main() {
                                     iomod_manifest.iomod.version,
                                     entrypoint
                                 );
-                                let path = std::path::Path::new(path);
-                                {
-                                    let path_prefix = path.parent().unwrap();
-                                    fs::create_dir_all(path_prefix).expect(&*format!(
-                                        "unable to create directory {:?}",
-                                        path_prefix
-                                    ));
-                                    let mut entrypoint_file = File::create(path)
-                                        .expect(&*format!("unable to create file at {:?}", path));
-                                    std::io::copy(&mut entrypoint_binary, &mut entrypoint_file)
-                                        .expect("unable to copy entrypoint");
-                                    let mut perms: std::fs::Permissions =
-                                        fs::metadata(&path).unwrap().permissions();
-                                    perms.set_mode(0o755);
-                                    entrypoint_file.set_permissions(perms)
+                                let path = Path::new(path);
+                                if !path.exists() {
+                                    {
+                                        let path_prefix = path.parent().unwrap();
+                                        fs::create_dir_all(path_prefix).expect(&*format!(
+                                            "unable to create directory {:?}",
+                                            path_prefix
+                                        ));
+                                        let mut entrypoint_file = File::create(path)
+                                            .expect(&*format!("unable to create file at {:?}", path));
+                                        std::io::copy(&mut entrypoint_binary, &mut entrypoint_file)
+                                            .expect("unable to copy entrypoint");
+                                        let mut perms: fs::Permissions =
+                                            fs::metadata(&path).unwrap().permissions();
+                                        perms.set_mode(0o755);
+                                        entrypoint_file.set_permissions(perms)
                                             .expect("could not set IOmod binary executable (octal 755) permissions");
+                                    }
+                                    process::Command::new(path).spawn().unwrap();
                                 }
-                                process::Command::new(path).spawn().unwrap();
                             }
                         }
-                        _ => {}
-                    },
-                    None => {
-                        process::Command::new(entry.path()).spawn().unwrap();
                     }
                 }
             }
         }
+    } else {
+        println!("WARN Could not find dir /opt/iomod");
     }
 
     let module_path = env::var("LAMBDA_TASK_ROOT").unwrap();
     let handler_name = env::var("_HANDLER").unwrap();
-    let parts = handler_name.split(".").collect::<Vec<&str>>();
-    let function_name = String::from(parts[0]);
+
+    // Mapped to /tmp inside the WASM module
+    fs::create_dir_all("/tmp/asmltmp").expect("could not create /tmp/asmltmp");
 
     if let Ok("ruby-lambda") = env::var("ASML_FUNCTION_ENV").as_deref() {
         let rubysrc_path = "/tmp/rubysrc";
@@ -153,57 +154,48 @@ async fn main() {
 
     let (status_sender, _status_receiver) = bounded::<()>(1);
 
-    let task_set = tokio::task::LocalSet::new();
-    task_set
-        .run_until(async move {
-            let (module, store) = match wasm::deserialize_module_from_path::<LambdaAbi, ()>(
-                &module_path,
-                &handler_name,
-            ) {
-                Ok(module) => (Arc::new(module.0), Arc::new(module.1)),
-                Err(_) => panic!("PANIC this shouldn't happen"),
-            };
+    tokio::task::LocalSet::new().run_until(async move {
+        let mut full_path = PathBuf::from(&module_path);
+        full_path.push(&handler_name);
+        let wasmtime = Arc::new(Mutex::new(
+            Wasmtime::<LambdaAbi, ()>::new_from_path(Path::new(full_path.as_path()))
+                .expect("could not create WASM runtime from module path")
+        ));
 
-            while let Ok(event) = LAMBDA_RUNTIME.get_next_event().await {
-                {
-                    let ref_cell = LAMBDA_REQUEST_ID.lock().unwrap();
-                    if ref_cell.borrow().clone() == event.request_id.clone() {
-                        continue;
-                    }
-                    ref_cell.replace(event.request_id.clone());
+        while let Ok(event) = LAMBDA_RUNTIME.get_next_event().await {
+            {
+                let ref_cell = LAMBDA_REQUEST_ID.lock().unwrap();
+                if ref_cell.borrow().clone() == event.request_id.clone() {
+                    continue;
                 }
-
-                let (import_object, env) = wasm::build_module::<LambdaAbi, ()>(
-                    tx.clone(),
-                    status_sender.clone(),
-                    module.clone(),
-                    &function_name,
-                    store.clone(),
-                )
-                .expect("could not build WASM module");
-                // TODO we can save some cycles by creating Instances up-front in a pool & recycling them
-                let instance = match wasm::new_instance(module.clone(), import_object.clone()) {
-                    Ok(instance) => Arc::new(instance),
-                    Err(why) => panic!("PANIC {}", why.to_string()),
-                };
-                env.host_input_buffer
-                    .clone()
-                    .lock()
-                    .unwrap()
-                    .initialize(event.event_body.into_bytes());
-                tokio::task::spawn_local(async move {
-                    // env.clone().threader.lock().unwrap().__reset_memory();
-
-                    let handler_call = instance.exports.get_function("_start").unwrap();
-                    match handler_call.call(&[]) {
-                        Ok(result) => println!("SUCCESS: handler returned {:?}", result),
-                        Err(error) => println!("ERROR: {}", error.to_string()),
-                    }
-                })
-                .await
-                .unwrap();
-                // std::mem::drop(env.clone().threader);
+                ref_cell.replace(event.request_id.clone());
             }
-        })
-        .await;
+
+            let (instance, mut store) = wasmtime
+                .lock()
+                .unwrap()
+                .link_module(tx.clone(), status_sender.clone())
+                .expect("could not link wasm module");
+
+            wasmtime
+                .lock()
+                .unwrap()
+                .initialize_function_input_buffer(&mut store, &event.event_body.into_bytes())
+                .expect("could not initialize input buffer");
+
+            let wasmtime = wasmtime.clone();
+            tokio::task::spawn_local(async move {
+                // env.clone().threader.lock().unwrap().__reset_memory();
+
+                match wasmtime.lock().unwrap().start(&mut store, instance) {
+                    Ok(result) => println!("SUCCESS: handler returned {:?}", result),
+                    Err(error) => println!("ERROR: {}", error.to_string()),
+                }
+            })
+            .await
+            .unwrap();
+            // std::mem::drop(env.clone().threader);
+        }
+    })
+    .await;
 }
