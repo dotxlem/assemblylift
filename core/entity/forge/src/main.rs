@@ -2,7 +2,6 @@ use std::convert::Infallible;
 
 use aws_sdk_secretsmanager::{Client as SecretsManagerClient, Error, PKG_VERSION, Region};
 use macaroon::{Format, Macaroon, MacaroonKey};
-use macaroon::crypto::Encryptor;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use warp::Filter;
@@ -20,16 +19,18 @@ struct MintRequest {
 
 // FIXME /mint assumes that we always want to mint from the root key (ie `key` is always the root key)
 //       but really we should look up the key from the id and use whatever that is
-fn mint_request(req: MintRequest, key: &str) -> WithStatus<Vec<u8>> {
+//       |
+//       --> or is there a forge per TS?
+fn mint_request(req: MintRequest, key: &MacaroonKey) -> WithStatus<Vec<u8>> {
     let mut macaroon = Macaroon::create(
         Some(req.location.clone()),
-        &key.into(),
+        key,
         req.id.clone().into(),
     )
     .unwrap();
     macaroon.add_first_party_caveat(req.policy_document.clone().into());
     let out = macaroon.serialize(Format::V2JSON).unwrap();
-    warp::reply::with_status(out, StatusCode::OK)
+    warp::reply::with_status(out.into(), StatusCode::OK)
 }
 
 /// Each forge has a unique Root Key
@@ -51,11 +52,20 @@ async fn get_root_key() -> String {
 #[tokio::main]
 async fn main() {
     let key = get_root_key().await;
+    let mut s = [0u8; 32];
+    for (i, b) in key.as_bytes().into_iter().enumerate() {
+        if i < 32 {
+            s[i] = *b;
+        } else {
+            break;
+        }
+    }
 
+    let key = s.to_owned();
     let mint = warp::post()
         .and(warp::path("mint"))
         .and(warp::body::json())
-        .map(move |req| mint_request(req, &key));
+        .map(move |req| mint_request(req, &key.into()));
 
     warp::serve(mint).run(([0, 0, 0, 0], 3030)).await;
 }
