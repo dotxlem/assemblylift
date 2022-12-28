@@ -256,7 +256,16 @@ impl Castable for LambdaService {
             .filter(|&a| a.r#type.to_lowercase() != "aws_iam")
             .map(|a| ServiceAuthData {
                 id: a.id.clone(),
-                r#type: a.r#type.clone(),
+                r#type: match a.r#type.as_str() {
+                    "macaroon" => "REQUEST".into(),
+                    t => t.into(),
+                },
+                mac_config: match a.r#type.as_str() {
+                    "macaroon" => Some(ServiceAuthDataMacaroonConfig {
+                        invoke_arn: "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:235724345984:function:asml-echopod-auth-verify/invocations".to_string(),
+                    }),
+                    _ => None,
+                },
                 jwt_config: match &a.jwt_config {
                     Some(jwt) => {
                         let audience = render_string_list(jwt.audience.clone());
@@ -371,7 +380,10 @@ impl Castable for LambdaFunction {
                                     id
                                 )),
                             },
-                            r#type: auth_type.clone(),
+                            r#type: match auth_type.as_str() {
+                                "macaroon" => "CUSTOM".into(),
+                                t => t.into(),
+                            },
                             scopes: match auth_type.to_lowercase().as_str() {
                                 "aws_iam" => None,
                                 _ => Some(render_string_list(authorizer.scopes.clone())),
@@ -452,12 +464,6 @@ impl Template for LambdaBaseTemplate {
 
     fn tmpl() -> &'static str {
         r#"# AssemblyLift AWS Lambda Provider Begin
-
-// provider aws {
-//     alias  = "{{project_name}}-aws-lambda"
-//     region = "{{options.aws_region}}"
-// }
-
 "#
     }
 }
@@ -527,6 +533,14 @@ resource aws_apigatewayv2_stage {{service_name}}_default_stage {
     name        = "$default"
     auto_deploy = true
 }
+
+resource aws_lambda_permission asml_{{service_name}}_macaroon_authorizer {
+    provider      = aws.{{project_name}}-aws-lambda
+    action        = "lambda:InvokeFunction"
+    function_name = "asml-echopod-auth-verify"
+    principal     = "apigateway.amazonaws.com"
+    source_arn    = "${aws_apigatewayv2_api.{{service_name}}_http_api.execution_arn}/*"
+}
 {{/if}}
 
 {{#each authorizers}}resource aws_apigatewayv2_authorizer {{../service_name}}_{{this.id}} {
@@ -536,8 +550,12 @@ resource aws_apigatewayv2_stage {{service_name}}_default_stage {
     authorizer_type  = "{{this.type}}"
     identity_sources = ["$request.header.Authorization"]
     name             = "{{../service_name}}-{{this.id}}"
-
-    {{#if this.jwt_config}}jwt_configuration {
+    {{#if this.mac_config}}
+    authorizer_uri                    = "{{this.mac_config.invoke_arn}}"
+    authorizer_payload_format_version = "2.0"
+    enable_simple_responses           = true{{/if}}
+    {{#if this.jwt_config}}
+    jwt_configuration {
         audience = {{{this.jwt_config.audience}}}
         issuer   = "{{this.jwt_config.issuer}}"
     }{{/if}}
@@ -712,6 +730,7 @@ pub struct FunctionAuthData {
 pub struct ServiceAuthData {
     pub id: String,
     pub r#type: String,
+    pub mac_config: Option<ServiceAuthDataMacaroonConfig>,
     pub jwt_config: Option<ServiceAuthDataJwtConfig>,
 }
 
@@ -719,6 +738,11 @@ pub struct ServiceAuthData {
 pub struct ServiceAuthDataJwtConfig {
     pub audience: String,
     pub issuer: String,
+}
+
+#[derive(Serialize)]
+pub struct ServiceAuthDataMacaroonConfig {
+    pub invoke_arn: String,
 }
 
 #[derive(Serialize)]
