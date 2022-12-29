@@ -26,6 +26,30 @@ impl fmt::Display for ArchiveError {
     }
 }
 
+pub fn zip_files(files: Vec<PathBuf>, file_out: impl AsRef<Path>) -> Result<(), ArchiveError> {
+    let file = match fs::File::create(&file_out) {
+        Ok(file) => file,
+        Err(why) => panic!("could not create zip archive: {}", why.to_string()),
+    };
+
+    let mut zip = zip::ZipWriter::new(file);
+    let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+    for file in files {
+        let mut file_bytes = match fs::read(&file) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+
+        zip.start_file(file.file_name().unwrap().to_str().unwrap(), options)
+            .expect("could not create zip archive");
+        zip.write_all(file_bytes.as_mut_slice())
+            .expect("could not create zip archive");
+    }
+
+    Ok(())
+}
+
 pub fn zip_dirs(
     dirs_in: Vec<PathBuf>,
     file_out: impl AsRef<Path>,

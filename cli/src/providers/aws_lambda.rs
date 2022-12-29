@@ -7,18 +7,21 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use handlebars::{Handlebars, to_json};
+use handlebars::{to_json, Handlebars};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use registry_common::models::GetIomodAtResponse;
 use serde::Serialize;
 
 use crate::archive;
-use crate::providers::{AWS_LAMBDA_PROVIDER_NAME, DNS_PROVIDERS, flatten, LockBox, Options, Provider, ProviderError, ProviderMap, render_string_list};
-use crate::transpiler::{
-    Artifact, Bindable, Bootable, Castable, CastError, ContentType, context, Template,
+use crate::providers::{
+    flatten, render_string_list, LockBox, Options, Provider, ProviderError, ProviderMap,
+    AWS_LAMBDA_PROVIDER_NAME, DNS_PROVIDERS,
 };
 use crate::transpiler::context::{Context, Function};
+use crate::transpiler::{
+    context, Artifact, Bindable, Bootable, CastError, Castable, ContentType, Template,
+};
 
 pub struct AwsLambdaProvider {
     options: Arc<Options>,
@@ -26,6 +29,9 @@ pub struct AwsLambdaProvider {
 
 impl AwsLambdaProvider {
     pub fn new() -> Self {
+        fs::create_dir_all("./.asml/runtime").unwrap();
+
+        // fetch bootstrap
         let runtime_url = &*format!(
             "http://public.assemblylift.akkoro.io/runtime/{}/aws-lambda/bootstrap.zip",
             clap::crate_version!(),
@@ -38,8 +44,33 @@ impl AwsLambdaProvider {
         let mut response_buffer = Vec::new();
         response.read_to_end(&mut response_buffer).unwrap();
 
-        fs::create_dir_all("./.asml/runtime").unwrap();
         fs::write("./.asml/runtime/bootstrap.zip", response_buffer).unwrap();
+
+        // fetch auth verifier builtin
+        let url = &*format!(
+            "http://public.assemblylift.akkoro.io/builtins/{}/functions/assemblylift-builtins-verify-macaroon.wasm",
+            clap::crate_version!(),
+        );
+        let mut response =
+            reqwest::blocking::get(url).expect("could not download bootstrap.zip");
+        if !response.status().is_success() {
+            panic!("unable to fetch asml runtime from {}", url);
+        }
+        let mut response_buffer = Vec::new();
+        response.read_to_end(&mut response_buffer).unwrap();
+
+        fs::write(
+            "./.asml/runtime/assemblylift-builtins-verify-macaroon.wasm",
+            response_buffer,
+        )
+        .unwrap();
+        archive::zip_files(
+            vec![PathBuf::from(
+                "./.asml/runtime/assemblylift-builtins-verify-macaroon.wasm",
+            )],
+            "./.asml/runtime/assemblylift-builtins-verify-macaroon.zip",
+        )
+        .expect("could not zip builtin");
 
         Self {
             options: Arc::new(Options::new()),
@@ -116,7 +147,7 @@ impl AwsLambdaProvider {
         archive::zip_dirs(
             vec![ruby_dir.into()],
             format!("./.asml/runtime/{}-ruby.zip", &service_name),
-            vec!["ruby.wasmu", "ruby.wasm", "ruby"],
+            vec!["ruby.wasm.bin", "ruby.wasmu", "ruby.wasm", "ruby"],
         )
         .map_err(|_| CastError("could not zip ruby env directory".into()))
     }
