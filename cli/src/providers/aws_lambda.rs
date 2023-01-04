@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use handlebars::{to_json, Handlebars};
+use handlebars::{Handlebars, to_json};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use registry_common::models::GetIomodAtResponse;
@@ -17,9 +17,6 @@ use crate::archive;
 use crate::providers::{AWS_LAMBDA_PROVIDER_NAME, DNS_PROVIDERS, flatten, LockBox, Options, Provider, ProviderError, ProviderMap, render_string_list, render_string_map};
 use crate::transpiler::{Artifact, Bindable, Bootable, Castable, CastError, ContentType, context, StringMap, Template};
 use crate::transpiler::context::{Context, Function};
-use crate::transpiler::{
-    context, Artifact, Bindable, Bootable, CastError, Castable, ContentType, Template,
-};
 
 pub struct AwsLambdaProvider {
     options: Arc<Options>,
