@@ -14,10 +14,8 @@ use registry_common::models::GetIomodAtResponse;
 use serde::Serialize;
 
 use crate::archive;
-use crate::providers::{
-    flatten, render_string_list, LockBox, Options, Provider, ProviderError, ProviderMap,
-    AWS_LAMBDA_PROVIDER_NAME, DNS_PROVIDERS,
-};
+use crate::providers::{AWS_LAMBDA_PROVIDER_NAME, DNS_PROVIDERS, flatten, LockBox, Options, Provider, ProviderError, ProviderMap, render_string_list, render_string_map};
+use crate::transpiler::{Artifact, Bindable, Bootable, Castable, CastError, ContentType, context, StringMap, Template};
 use crate::transpiler::context::{Context, Function};
 use crate::transpiler::{
     context, Artifact, Bindable, Bootable, CastError, Castable, ContentType, Template,
@@ -424,13 +422,26 @@ impl Castable for LambdaFunction {
                     None => None,
                 };
 
+                let environment: StringMap<String> = function
+                    .environment
+                    .clone()
+                    .unwrap_or(Rc::new(StringMap::<String>::new()))
+                    .iter()
+                    .map(|e| (format!("__ASML_{}", e.0.clone()), e.1.clone()))
+                    .collect();
+
+                let ext = match function.precompile {
+                    true => "wasm.bin",
+                    false => "wasm",
+                };
+
                 let tmpl = FunctionTemplate {
                     project_name: ctx.project.name.clone(),
                     service_name: service.clone(),
                     function_name: function.name.clone(),
                     handler_name: match function.language.as_str() {
-                        "rust" => format!("{}.wasm.bin", function.name.clone()),
-                        "ruby" => "ruby.wasm.bin".into(),
+                        "rust" => format!("{}.{}", function.name.clone(), ext),
+                        "ruby" => format!("ruby.{}", ext),
                         _ => "handler.wasm.bin".into(),
                     },
                     runtime_layer: format!(
@@ -462,6 +473,7 @@ impl Castable for LambdaFunction {
                         None => None,
                     },
                     auth,
+                    environment: render_string_map(environment),
                 };
 
                 let hcl = Artifact {
@@ -619,6 +631,7 @@ pub struct FunctionTemplate {
     pub size: u16,
     pub timeout: u16,
     pub project_name: String,
+    pub environment: String,
 }
 
 impl Template for FunctionTemplate {
@@ -658,9 +671,11 @@ resource aws_lambda_function asml_{{service_name}}_{{function_name}} {
     {{/if}}
 
     {{#if ruby_layer}}environment {
-      variables = {
+      variables = merge({
         ASML_FUNCTION_ENV = "ruby-lambda"
-      }
+      }, {{{this.environment}}})
+    }{{else}}environment {
+      variables = {{{this.environment}}}
     }{{/if}}
 
     layers = [{{runtime_layer}}{{#if iomods_layer}}, {{iomods_layer}}{{/if}}{{#if ruby_layer}}, {{ruby_layer}}{{/if}}]

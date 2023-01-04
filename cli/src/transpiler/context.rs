@@ -99,6 +99,8 @@ impl Context {
                     language: function.language.clone().unwrap_or("rust".to_string()),
                     size: function.size_mb.unwrap_or(1024u16),
                     timeout: function.timeout_seconds.unwrap_or(5u16),
+                    cpu_compat_mode: function.cpu_compat_mode.clone().unwrap_or("default".to_string()),
+                    precompile: function.precompile.unwrap_or(true),
                     http: match &function.clone().http.as_ref() {
                         Some(http) => Some(Http {
                             verb: http.verb.clone(),
@@ -107,6 +109,7 @@ impl Context {
                         None => None,
                     },
                     authorizer_id: function.authorizer_id.clone(),
+                    environment: function.environment.clone(),
                 });
             }
 
@@ -357,12 +360,14 @@ pub struct Function {
     pub registry: String,
     pub language: String,
     pub service_name: String,
-
+    pub environment: Option<Rc<StringMap<String>>>,
     pub http: Option<Http>,
     pub authorizer_id: Option<String>,
 
     pub size: u16,
     pub timeout: u16,
+    pub cpu_compat_mode: String,
+    pub precompile: bool,
 }
 
 pub struct Http {
@@ -431,22 +436,24 @@ locals {
 {{#each providers}}
 provider {{tf_name}} {
     alias  = "{{../project_name}}-{{name}}"
-    region = "{{options.aws_region}}"
+    {{#if (eq tf_name "aws")}}region = "{{options.aws_region}}"{{/if}}
+    {{#if (eq tf_name "kubernetes")}}config_path = pathexpand("~/.kube/config"){{/if}}
 }
 {{/each}}
 {{#if user_inject}}module "usermod" {
   source = "../user_tf"
   providers = {
-  {{#each providers}}  {{this.tf_name}}.{{../project_name}}-{{this.name}} = {{this.tf_name}}.{{../project_name}}-{{this.name}}{{/each}}
+  {{#each providers}}  {{this.tf_name}}.{{../project_name}}-{{this.name}} = {{this.tf_name}}.{{../project_name}}-{{this.name}}
+  {{/each}}
   }
 }{{/if}}
 {{#if remote_state}}terraform {
   backend "s3" {
-    encrypt = true
-    bucket = "{{state_bucket_name}}"
+    encrypt        = true
+    bucket         = "{{state_bucket_name}}"
     dynamodb_table = "{{lock_table_name}}"
-    key    = "terraform.tfstate"
-    region = "us-east-1"
+    key            = "terraform.tfstate"
+    region         = "us-east-1"
   }
 }{{/if}}
 "#

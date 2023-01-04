@@ -1,11 +1,13 @@
 use std::fs::File;
 use std::io::Write;
+use std::iter::FromIterator;
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
+use std::string::ToString;
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
-use tokio::sync::mpsc;
+use once_cell::sync::Lazy;
 use wasmtime::{Caller, Config, Engine, Func, Instance, Linker, Module, Store};
 use wasmtime_wasi::{Dir, WasiCtx, WasiCtxBuilder};
 
@@ -15,12 +17,12 @@ use crate::abi::*;
 use crate::buffers::FunctionInputBuffer;
 use crate::threader::Threader;
 
+pub type BufferElement = (usize, u8);
+
 pub type State<S> = AsmlFunctionState<S>;
 
-pub type BufferElement = (usize, u8);
-pub type MemoryTx = mpsc::Sender<BufferElement>;
-pub type MemoryRx = mpsc::Receiver<BufferElement>;
-pub type MemoryChannel = (MemoryTx, MemoryRx);
+pub static CPU_COMPAT_MODE: Lazy<String> =
+    Lazy::new(|| std::env::var("ASML_CPU_COMPAT_MODE").unwrap_or("default".to_string()));
 
 pub struct Wasmtime<R, S>
 where
@@ -39,10 +41,24 @@ where
     S: Clone + Send + Sized + 'static,
 {
     pub fn new_from_path(module_path: &Path) -> anyhow::Result<Self> {
-        let engine = Engine::default();
-        match unsafe { Module::deserialize_file(&engine, module_path) } {
+        let m = match module_path.extension().unwrap().to_str().unwrap() {
+            "bin" => {
+                let engine = new_engine(Some("x86_64-linux-gnu"), None)?;
+                let module = unsafe { Module::deserialize_file(&engine, module_path) };
+                (engine, module)
+            },
+            "wasm" => {
+                let engine = new_engine(None, None)?;
+                let module = Module::from_file(&engine, module_path);
+                (engine, module)
+            },
+            _ => return Err(anyhow!(
+                "invalid module extension; must be .wasm or .wasm.bin"
+            )),
+        };
+        match m.1 {
             Ok(module) => Ok(Self {
-                engine,
+                engine: m.0,
                 module,
                 _phantom_r: Default::default(),
                 _phantom_s: Default::default(),
@@ -52,7 +68,7 @@ where
     }
 
     pub fn new_from_bytes(module_bytes: &[u8]) -> anyhow::Result<Self> {
-        let engine = Engine::default();
+        let engine = new_engine(Some("x86_64-linux-gnu"), None)?;
         match unsafe { Module::deserialize(&engine, module_bytes) } {
             Ok(module) => Ok(Self {
                 engine,
@@ -72,16 +88,28 @@ where
         let threader = ManuallyDrop::new(Arc::new(Mutex::new(Threader::new(registry_tx))));
         let mut linker: Linker<State<S>> = Linker::new(&self.engine);
 
+        // FIXME this might be confusingly named (confused with the function env vars)
         let function_env = std::env::var("ASML_FUNCTION_ENV").unwrap_or("default".into());
 
         if let Err(err) = wasmtime_wasi::add_to_linker(&mut linker, |s| &mut s.wasi) {
             return Err(anyhow!(err));
         }
+        // env vars prefixed with __ASML_ are defined in the function definition;
+        // the prefix indicates that they are to be mapped to the module environment
+        let envs: Vec<(String, String)> = Vec::from_iter(
+            std::env::vars()
+                .into_iter()
+                .filter(|e| e.0.starts_with("__ASML_"))
+                .map(|e| (e.0.replace("__ASML_", ""), e.1))
+                .into_iter(),
+        );
         let wasi = match function_env.as_str() {
             "ruby-docker" => WasiCtxBuilder::new()
                 .arg("/src/handler.rb")
                 .unwrap()
                 .env("RUBY_PLATFORM", "wasm32-wasi")
+                .unwrap()
+                .envs(&*envs)
                 .unwrap()
                 .preopened_dir(
                     Dir::from_std_file(File::open("/usr/bin/ruby-wasm32-wasi/src").unwrap()),
@@ -104,6 +132,8 @@ where
                 .unwrap()
                 .env("RUBY_PLATFORM", "wasm32-wasi")
                 .unwrap()
+                .envs(&*envs)
+                .unwrap()
                 .preopened_dir(
                     Dir::from_std_file(File::open("/tmp/rubysrc").unwrap()),
                     "/src",
@@ -121,6 +151,8 @@ where
                 .expect("could not map guest tmpfs -- is /tmp accessible?")
                 .build(),
             _ => WasiCtxBuilder::new()
+                .envs(&*envs)
+                .unwrap()
                 .preopened_dir(
                     Dir::from_std_file(File::open("/tmp/asmltmp").unwrap()),
                     "/tmp",
@@ -219,7 +251,7 @@ where
         match instance
             .get_func(&mut store, "_start")
             .expect("could not find default function")
-            .typed::<(), (), _>(&mut store)
+            .typed::<(), ()>(&mut store)
             .expect("invalid default function signature")
             .call(&mut store, ())
         {
@@ -268,8 +300,7 @@ where
     wasi: WasiCtx,
 }
 
-pub fn precompile(module_path: &Path, target: &str) -> anyhow::Result<PathBuf> {
-    // TODO compiler configuration
+pub fn precompile(module_path: &Path, target: &str, mode: &str) -> anyhow::Result<PathBuf> {
     let file_path = format!("{}.bin", module_path.display().to_string());
     println!("Precompiling WASM to {}...", file_path.clone());
 
@@ -277,7 +308,7 @@ pub fn precompile(module_path: &Path, target: &str) -> anyhow::Result<PathBuf> {
         Ok(bytes) => bytes,
         Err(err) => return Err(err.into()),
     };
-    let engine = Engine::new(Config::new().target(target).unwrap()).unwrap();
+    let engine = new_engine(Some(target), Some(mode))?;
     let compiled_bytes = engine
         .precompile_module(&*wasm_bytes)
         .expect("TODO: panic message");
@@ -289,4 +320,32 @@ pub fn precompile(module_path: &Path, target: &str) -> anyhow::Result<PathBuf> {
     println!("📄 > Wrote {}", &file_path);
 
     Ok(PathBuf::from(file_path))
+}
+
+fn new_engine(target: Option<&str>, cpu_compat_mode: Option<&str>) -> anyhow::Result<Engine> {
+    let mode = match cpu_compat_mode {
+        Some(mode) => mode,
+        None => CPU_COMPAT_MODE.as_str(),
+    };
+    let mut config = match mode {
+        "default" => Config::new().clone(),
+        "high" => unsafe {
+            Config::new()
+                .wasm_simd(false)
+                .cranelift_flag_set("has_sse3", "false")
+                .cranelift_flag_set("has_ssse3", "false")
+                .cranelift_flag_set("has_sse41", "false")
+                .cranelift_flag_set("has_sse42", "false")
+                .clone()
+        },
+        _ => Config::new().clone(),
+    };
+    let config = match target {
+        Some(target) => config.target(target).unwrap().clone(),
+        None => config,
+    };
+    match Engine::new(&config) {
+        Ok(engine) => Ok(engine),
+        Err(err) => Err(anyhow!(err)),
+    }
 }
