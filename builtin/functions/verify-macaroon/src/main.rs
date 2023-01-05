@@ -28,7 +28,7 @@ async fn main() {
             .to_string(),
     )
     .await
-    .unwrap();
+    .unwrap(); // TODO catch error once FunctionContext::error is implemented
 
     match verifier.verify(
         &macaroon,
@@ -41,8 +41,10 @@ async fn main() {
 }
 
 async fn get_user_key(user_id: String) -> Result<String, String> {
+    let secret_prefix = std::env::var("ASML_AUTH_USER_SECRET_PREFIX")
+        .unwrap_or("asml/auth".into());
     let mut get_secret_req = GetSecretValueRequest::default();
-    get_secret_req.secret_id = format!("echopod/user/{}", &user_id);
+    get_secret_req.secret_id = format!("{}/{}", &secret_prefix, &user_id);
     match secretsmanager::get_secret_value(get_secret_req).await {
         Ok(res) => Ok(res.secret_string.unwrap()),
         Err(err) => Err(err.to_string()),

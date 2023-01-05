@@ -47,9 +47,9 @@ impl AwsLambdaProvider {
             clap::crate_version!(),
         );
         let mut response =
-            reqwest::blocking::get(url).expect("could not download bootstrap.zip");
+            reqwest::blocking::get(url).expect("could not download");
         if !response.status().is_success() {
-            panic!("unable to fetch asml runtime from {}", url);
+            panic!("unable to fetch verifier builtin from {}", url);
         }
         let mut response_buffer = Vec::new();
         response.read_to_end(&mut response_buffer).unwrap();
@@ -504,6 +504,62 @@ impl Template for LambdaBaseTemplate {
 
     fn tmpl() -> &'static str {
         r#"# AssemblyLift AWS Lambda Provider Begin
+
+resource aws_lambda_function asml_{{service_name}}_{{function_name}} {
+    provider = aws.{{project_name}}-aws-lambda
+
+    function_name = "asml-{{project_name}}-{{service_name}}-{{function_name}}"
+    role          = aws_iam_role.{{service_name}}_{{function_name}}_lambda_iam_role.arn
+    runtime       = "provided"
+    handler       = "assemblylift-builtins-verify-macaroon.wasm"
+    timeout       = {{timeout}}
+    memory_size   = {{size}}
+    filename      = "${local.project_path}/.asml/runtime/assemblylift-builtins-verify-macaroon.zip"
+    layers        = [{{runtime_layer}}]
+
+    source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/assemblylift-builtins-verify-macaroon.zip")
+}
+
+resource aws_iam_role {{service_name}}_{{function_name}}_lambda_iam_role {
+    provider = aws.{{project_name}}-aws-lambda
+    name     = "asml-{{project_name}}-{{service_name}}-{{function_name}}"
+
+    assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+
+    inline_policy {
+        name = "allow-cloudwatch-logging"
+        policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*",
+      "Effect": "Allow"
+    }
+  ]
+}
+EOF
+    }
+}
 "#
     }
 }
@@ -659,15 +715,14 @@ resource aws_lambda_function asml_{{service_name}}_{{function_name}} {
     handler       = "{{handler_name}}"
     timeout       = {{timeout}}
     memory_size   = {{size}}
-
     {{#if large_payload}}
     s3_key    = "{{../function_name}}.zip"
     s3_bucket = aws_s3_bucket.asml_{{../service_name}}_functions.id
     {{else}}
     filename  = "${local.project_path}/net/services/{{../service_name}}/{{../function_name}}/{{../function_name}}.zip"
     {{/if}}
-
-    {{#if ruby_layer}}environment {
+    {{#if ruby_layer}}
+    environment {
       variables = merge({
         ASML_FUNCTION_ENV = "ruby-lambda"
       }, {{{this.environment}}})

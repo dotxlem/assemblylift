@@ -43,7 +43,6 @@ async fn main() {
     if let Ok(rd) = fs::read_dir("/opt") {
         for entry in rd {
             let entry = entry.unwrap();
-            println!("DEBUG entry={:?}", entry);
             if entry.file_type().unwrap().is_file() {
                 // FIXME this makes the assumption that the
                 //       IOmod entrypoint is always an executable binary
@@ -112,6 +111,8 @@ async fn main() {
     // Mapped to /tmp inside the WASM module
     fs::create_dir_all("/tmp/asmltmp").expect("could not create /tmp/asmltmp");
 
+    // copy ruby source & runtime environment to /tmp
+    // tmp dirs are mapped inside the WASM module
     if let Ok("ruby-lambda") = env::var("ASML_FUNCTION_ENV").as_deref() {
         let rubysrc_path = "/tmp/rubysrc";
         if !Path::new(&rubysrc_path).exists() {

@@ -1,6 +1,6 @@
 [package]
 name = "assemblylift-cli"
-version = "0.4.0-alpha.12"
+version = "0.4.0-beta.0"
 description = "The AssemblyLift Command Line Interface"
 authors = ["Akkoro and the AssemblyLift contributors <assemblylift@akkoro.io>"]
 edition = "2018"
@@ -34,7 +34,7 @@ zip = "0.6"
 
 wasmtime = "4.0"
 
-assemblylift-core = { version = "0.4.0-alpha.12", path = "../core" }
+assemblylift-core = { version = "0.4.0-beta.0", path = "../core" }
 assemblylift-core-iomod = { version = "0.4.0-alpha.0", path = "../core/iomod" }
 
 registry_common = { version = "0.1", package = "asml-iomod-registry-common" }
