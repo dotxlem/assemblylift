@@ -39,7 +39,7 @@ async fn main() {
 }
 
 async fn get_token_key(token_id: String) -> Result<String, String> {
-    let secret_prefix = std::env::var("ASML_AUTH_USER_SECRET_PREFIX")
+    let secret_prefix = std::env::var("ASML_AUTH_TOKEN_SECRET_PREFIX")
         .unwrap_or("asml/auth".into());
     let mut get_secret_req = GetSecretValueRequest::default();
     get_secret_req.secret_id = format!("{}/{}", &secret_prefix, &token_id);
