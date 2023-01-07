@@ -466,7 +466,10 @@ impl Castable for LambdaFunction {
                         None => None,
                     },
                     auth,
-                    environment: render_string_map(environment),
+                    environment: match environment.keys().len() {
+                        0 => None,
+                        _ => Some(render_string_map(environment)),
+                    }
                 };
 
                 let hcl = Artifact {
@@ -690,7 +693,7 @@ pub struct FunctionTemplate {
     pub size: u16,
     pub timeout: u16,
     pub project_name: String,
-    pub environment: String,
+    pub environment: Option<String>,
 }
 
 impl Template for FunctionTemplate {
@@ -727,15 +730,15 @@ resource aws_lambda_function asml_{{service_name}}_{{function_name}} {
     {{else}}
     filename  = "${local.project_path}/net/services/{{../service_name}}/{{../function_name}}/{{../function_name}}.zip"
     {{/if}}
-    {{#if ruby_layer}}
-    environment {
+    {{#if this.environment}}
+    {{#if ruby_layer}}environment {
       variables = merge({
         ASML_FUNCTION_ENV = "ruby-lambda"
       }, {{{this.environment}}})
     }{{else}}environment {
       variables = {{{this.environment}}}
     }{{/if}}
-
+    {{/if}}
     layers = [{{runtime_layer}}{{#if iomods_layer}}, {{iomods_layer}}{{/if}}{{#if ruby_layer}}, {{ruby_layer}}{{/if}}]
 
     source_code_hash = filebase64sha256("${local.project_path}/net/services/{{service_name}}/{{function_name}}/{{function_name}}.zip")
