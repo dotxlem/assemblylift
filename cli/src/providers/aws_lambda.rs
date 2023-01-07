@@ -29,7 +29,8 @@ impl AwsLambdaProvider {
         // fetch bootstrap
         let runtime_url = &*format!(
             "http://public.assemblylift.akkoro.io/runtime/{}/aws-lambda/bootstrap.zip",
-            clap::crate_version!(),
+            // clap::crate_version!(),
+            "0.4.0-alpha.12"
         );
         let mut response =
             reqwest::blocking::get(runtime_url).expect("could not download bootstrap.zip");
@@ -44,7 +45,8 @@ impl AwsLambdaProvider {
         // fetch auth verifier builtin
         let url = &*format!(
             "http://public.assemblylift.akkoro.io/builtins/{}/functions/assemblylift-builtins-verify-macaroon.wasm",
-            clap::crate_version!(),
+            // clap::crate_version!(),
+            "0.4.0-alpha.12"
         );
         let mut response =
             reqwest::blocking::get(url).expect("could not download");
@@ -161,7 +163,7 @@ impl AwsLambdaProvider {
             .metadata()
             .unwrap()
             .size()
-            > (50 * 1000 * 1000)
+            > (50_000_000)
     }
 }
 
@@ -285,12 +287,6 @@ impl Castable for LambdaService {
                 r#type: match a.r#type.as_str() {
                     "macaroon" => "REQUEST".into(),
                     t => t.into(),
-                },
-                mac_config: match a.r#type.as_str() {
-                    "macaroon" => Some(ServiceAuthDataMacaroonConfig {
-                        invoke_arn: "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:235724345984:function:asml-echopod-auth-verify/invocations".to_string(),
-                    }),
-                    _ => None,
                 },
                 jwt_config: match &a.jwt_config {
                     Some(jwt) => {
@@ -443,7 +439,7 @@ impl Castable for LambdaFunction {
                     },
                     runtime_layer: format!(
                         "aws_lambda_layer_version.asml_{}_runtime.arn",
-                        service.clone()
+                        ctx.project.name.clone()
                     ),
                     iomods_layer: match iomod_names.len() {
                         0 => None,
@@ -505,24 +501,33 @@ impl Template for LambdaBaseTemplate {
     fn tmpl() -> &'static str {
         r#"# AssemblyLift AWS Lambda Provider Begin
 
-resource aws_lambda_function asml_{{service_name}}_{{function_name}} {
+resource aws_lambda_layer_version asml_{{project_name}}_runtime {
     provider = aws.{{project_name}}-aws-lambda
 
-    function_name = "asml-{{project_name}}-{{service_name}}-{{function_name}}"
-    role          = aws_iam_role.{{service_name}}_{{function_name}}_lambda_iam_role.arn
+    filename   = "${local.project_path}/.asml/runtime/bootstrap.zip"
+    layer_name = "asml-{{project_name}}-lambda-runtime"
+
+    source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/bootstrap.zip")
+}
+
+resource aws_lambda_function asml_{{project_name}}_auth_verify {
+    provider = aws.{{project_name}}-aws-lambda
+
+    function_name = "asml-{{project_name}}-auth-verify"
+    role          = aws_iam_role.{{project_name}}_auth_verify_lambda_iam_role.arn
     runtime       = "provided"
     handler       = "assemblylift-builtins-verify-macaroon.wasm"
-    timeout       = {{timeout}}
-    memory_size   = {{size}}
+    timeout       = 10
+    memory_size   = 512
     filename      = "${local.project_path}/.asml/runtime/assemblylift-builtins-verify-macaroon.zip"
-    layers        = [{{runtime_layer}}]
+    layers        = [aws_lambda_layer_version.asml_{{project_name}}_runtime.arn]
 
     source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/assemblylift-builtins-verify-macaroon.zip")
 }
 
-resource aws_iam_role {{service_name}}_{{function_name}}_lambda_iam_role {
+resource aws_iam_role {{project_name}}_auth_verify_lambda_iam_role {
     provider = aws.{{project_name}}-aws-lambda
-    name     = "asml-{{project_name}}-{{service_name}}-{{function_name}}"
+    name     = "asml-{{project_name}}-auth-verify"
 
     assume_role_policy = <<EOF
 {
@@ -568,6 +573,7 @@ EOF
 struct ServiceTemplate {
     project_name: String,
     service_name: String,
+    // FIXME deprecated
     layer_name: String,
     domain_name: String,
     has_iomods_layer: bool,
@@ -590,14 +596,14 @@ impl Template for ServiceTemplate {
     fn tmpl() -> &'static str {
         r#"# Begin service `{{service_name}}`
 
-resource aws_lambda_layer_version asml_{{service_name}}_runtime {
-    provider = aws.{{project_name}}-aws-lambda
-
-    filename   = "${local.project_path}/.asml/runtime/bootstrap.zip"
-    layer_name = "{{layer_name}}"
-
-    source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/bootstrap.zip")
-}
+// resource aws_lambda_layer_version asml_{{service_name}}_runtime {
+//     provider = aws.{{project_name}}-aws-lambda
+//
+//     filename   = "${local.project_path}/.asml/runtime/bootstrap.zip"
+//     layer_name = "{{layer_name}}"
+//
+//     source_code_hash = filebase64sha256("${local.project_path}/.asml/runtime/bootstrap.zip")
+// }
 
 {{#if has_iomods_layer}}resource aws_lambda_layer_version asml_{{service_name}}_iomods {
     provider = aws.{{project_name}}-aws-lambda
@@ -633,7 +639,7 @@ resource aws_apigatewayv2_stage {{service_name}}_default_stage {
 resource aws_lambda_permission asml_{{service_name}}_macaroon_authorizer {
     provider      = aws.{{project_name}}-aws-lambda
     action        = "lambda:InvokeFunction"
-    function_name = "asml-echopod-auth-verify"
+    function_name = aws_lambda_function.asml_{{project_name}}_auth_verify.function_name
     principal     = "apigateway.amazonaws.com"
     source_arn    = "${aws_apigatewayv2_api.{{service_name}}_http_api.execution_arn}/*"
 }
@@ -646,8 +652,8 @@ resource aws_lambda_permission asml_{{service_name}}_macaroon_authorizer {
     authorizer_type  = "{{this.type}}"
     identity_sources = ["$request.header.Authorization"]
     name             = "{{../service_name}}-{{this.id}}"
-    {{#if this.mac_config}}
-    authorizer_uri                    = "{{this.mac_config.invoke_arn}}"
+    {{#if (eq this.type "REQUEST")}}
+    authorizer_uri                    = aws_lambda_function.asml_{{../project_name}}_auth_verify.invoke_arn
     authorizer_payload_format_version = "2.0"
     enable_simple_responses           = true{{/if}}
     {{#if this.jwt_config}}
@@ -828,7 +834,6 @@ pub struct FunctionAuthData {
 pub struct ServiceAuthData {
     pub id: String,
     pub r#type: String,
-    pub mac_config: Option<ServiceAuthDataMacaroonConfig>,
     pub jwt_config: Option<ServiceAuthDataJwtConfig>,
 }
 
@@ -836,11 +841,6 @@ pub struct ServiceAuthData {
 pub struct ServiceAuthDataJwtConfig {
     pub audience: String,
     pub issuer: String,
-}
-
-#[derive(Serialize)]
-pub struct ServiceAuthDataMacaroonConfig {
-    pub invoke_arn: String,
 }
 
 #[derive(Serialize)]
