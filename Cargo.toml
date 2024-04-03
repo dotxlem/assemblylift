@@ -1,20 +1,20 @@
 [workspace]
 resolver = "2"
 members = [
-    "runtimes/aws-lambda/host",
-    "runtimes/aws-lambda/guest",
-    "runtimes/hyper",
-    "runtimes/components/wasi-secrets/in-memory",
+    "crates/runtimes/aws-lambda/host",
+    "crates/runtimes/aws-lambda/guest",
+    "crates/runtimes/hyper",
+    "crates/runtimes/components/wasi-secrets/in-memory",
 #    "builtin/functions/verify-macaroon",
-    "generator",
-    "tools",
-    "core",
-    "core/guest",
-    "core/guest/macros",
-    "core/iomod",
-    "core/iomod/guest",
-    "core/io/guest",
-    "core/io/common",
-    "cli"
+    "crates/generator",
+    "crates/tools",
+    "crates/core",
+    "crates/core/guest",
+    "crates/core/guest/macros",
+    "crates/core/iomod",
+    "crates/core/iomod/guest",
+    "crates/core/io/guest",
+    "crates/core/io/common",
+    "crates/cli"
 ]
 exclude = ["examples"]
