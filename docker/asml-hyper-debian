@@ -10,7 +10,7 @@ WORKDIR /usr/src/assemblylift
 COPY . .
 
 #RUN cd ./runtimes/hyper && cargo install --target x86_64-unknown-linux-musl --path .
-RUN cd ./runtimes/hyper && cargo install --path .
+RUN cd ./crates/runtimes/hyper && cargo install --path .
 
 
 # Runner Image
