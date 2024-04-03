@@ -11,4 +11,4 @@ COPY . .
 
 RUN cd ./crates/runtimes/aws-lambda/host && $HOME/.cargo/bin/cargo build --release
 
-CMD cat cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/"//g'
+CMD cat crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/"//g'

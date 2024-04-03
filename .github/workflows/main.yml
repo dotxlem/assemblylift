@@ -42,7 +42,7 @@ jobs:
 #    - name: 'Checkout'
 #      uses: actions/checkout@v2
 #    - name: 'Get Version'
-#      run: echo "ASML_VERSION=$(cat ./cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
+#      run: echo "ASML_VERSION=$(cat ./crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
 #    - name: 'Build Image'
 #      run: docker build -t assemblylift/asml-lambda-alpine . --file docker/asml-lambda-alpine
 #    - name: 'Add ECR Tag'
@@ -69,7 +69,7 @@ jobs:
 #      - name: 'Checkout'
 #        uses: actions/checkout@v2
 #      - name: 'Get Version'
-#        run: echo "ASML_VERSION=$(cat ./cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
+#        run: echo "ASML_VERSION=$(cat ./crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
 #      - name: 'Build Image'
 #        run: docker build -t assemblylift/openfaas-alpine . --file docker/asml-openfaas-alpine
 #      - name: 'Add ECR Tag'
@@ -98,7 +98,7 @@ jobs:
         with:
           submodules: recursive
       - name: 'Get Version'
-        run: echo "ASML_VERSION=$(cat ./cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
+        run: echo "ASML_VERSION=$(cat ./crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
       - name: 'Build Image'
         run: docker build -t assemblylift/hyper-debian . --file docker/asml-hyper-debian
       - name: 'Add ECR Tag'
@@ -133,9 +133,9 @@ jobs:
         with:
           command: build
           use-cross: false
-          args: --release --manifest-path ./cli/Cargo.toml
+          args: --release --manifest-path ./crates/cli/Cargo.toml
       - name: 'Get Version'
-        run: echo "ASML_VERSION=$(cat ./cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
+        run: echo "ASML_VERSION=$(cat ./crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
       - name: 'Upload to S3 @ akkoro-public'
         run: aws s3 cp ./target/release/asml s3://public.assemblylift.akkoro.io/cli/$ASML_VERSION/x86_64-apple-darwin/asml --acl public-read
 
@@ -164,9 +164,9 @@ jobs:
         with:
           command: build
           use-cross: false
-          args: --release --manifest-path ./cli/Cargo.toml
+          args: --release --manifest-path ./crates/cli/Cargo.toml
       - name: 'Get Version'
-        run: echo "ASML_VERSION=$(cat ./cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
+        run: echo "ASML_VERSION=$(cat ./crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
       - name: 'Upload to S3 @ akkoro-public'
         run: aws s3 cp ./target/release/asml s3://public.assemblylift.akkoro.io/cli/$ASML_VERSION/x86_64-linux-gnu/ubuntu-20.04/asml --acl public-read
 
@@ -197,9 +197,9 @@ jobs:
         with:
           command: build
           use-cross: false
-          args: --release --manifest-path ./cli/Cargo.toml
+          args: --release --manifest-path ./crates/cli/Cargo.toml
       - name: 'Get Version'
-        run: echo "ASML_VERSION=$(cat ./cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
+        run: echo "ASML_VERSION=$(cat ./crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
       - name: 'Upload to S3 @ akkoro-public'
         run: aws s3 cp ./target/release/asml s3://public.assemblylift.akkoro.io/cli/$ASML_VERSION/x86_64-linux-gnu/ubuntu-22.04/asml --acl public-read
 
@@ -227,6 +227,6 @@ jobs:
           use-cross: false
           args: --release --target wasm32-wasi --manifest-path ./builtin/functions/verify-macaroon/Cargo.toml
       - name: 'Get Version'
-        run: echo "ASML_VERSION=$(cat ./cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
+        run: echo "ASML_VERSION=$(cat ./crates/cli/Cargo.toml | grep version -m 1 | awk '{print $3}' | sed 's/\"//g')" >> $GITHUB_ENV
       - name: 'Upload to S3 @ akkoro-public'
         run: aws s3 cp ./target/wasm32-wasi/release/assemblylift-builtins-verify-macaroon.wasm s3://public.assemblylift.akkoro.io/builtins/$ASML_VERSION/functions/assemblylift-builtins-verify-macaroon.wasm --acl public-read
